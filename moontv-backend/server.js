@@ -28,6 +28,7 @@ app.use('/api/channels', require('./routes/channels'));
 app.use('/api/movies',   require('./routes/movies'));
 app.use('/api/series',   require('./routes/series'));
 app.use('/api/events',   require('./routes/events'));
+app.use('/api/categories', require('./routes/categories'));
 
 // ── Raíz ─────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.redirect('/admin'));
