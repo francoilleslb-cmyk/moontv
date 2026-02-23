@@ -993,6 +993,27 @@ tbody td {
 }
 .bulk-bar .btn-ghost:hover { border-color: var(--text2); color: var(--text); }
 
+
+/* ── CATEGORIES GRID ── */
+.cat-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 18px 16px;
+  display: flex; align-items: center; gap: 14px;
+  transition: var(--transition); position: relative;
+}
+.cat-card:hover { border-color: var(--border2); background: var(--bg3); }
+.cat-icon { font-size: 28px; width: 44px; text-align: center; flex-shrink: 0; }
+.cat-info { flex: 1; min-width: 0; }
+.cat-name { font-weight: 700; font-size: 15px; color: var(--text); }
+.cat-count { font-size: 12px; color: var(--text2); margin-top: 3px; }
+.cat-desc { font-size: 12px; color: var(--text3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.cat-from-channels { border-color: var(--border); opacity: .85; }
+.cat-from-channels::before {
+  content: 'auto'; position: absolute; top: 8px; right: 8px;
+  font-size: 10px; color: var(--text3); font-family: var(--mono);
+}
+
 </style>
 </head>
 <body>
@@ -1040,23 +1061,37 @@ tbody td {
 
   <nav class="sidebar-nav">
     <div class="nav-label">Contenido</div>
-    <div class="nav-item active" onclick="setView('channels')">
+    <div class="nav-item active" id="nav-channels" onclick="setView('channels')">
       <span class="icon">📺</span> Canales
       <span class="nav-badge" id="nav-total">—</span>
     </div>
-    <div class="nav-item" onclick="setView('import')">
-      <span class="icon">📥</span> Importar
+    <div class="nav-item" id="nav-movies" onclick="setView('movies')">
+      <span class="icon">🎬</span> Películas
+      <span class="nav-badge" id="nav-movies-count">—</span>
+    </div>
+    <div class="nav-item" id="nav-series-item" onclick="setView('series')">
+      <span class="icon">🎭</span> Series
+      <span class="nav-badge" id="nav-series-count">—</span>
+    </div>
+    <div class="nav-item" id="nav-categories-item" onclick="setView('categories')">
+      <span class="icon">🏷️</span> Categorías
+      <span class="nav-badge" id="nav-cats-count">—</span>
     </div>
 
-    <div class="nav-label" style="margin-top:8px">Herramientas</div>
-    <div class="nav-item" onclick="testAllStreams()">
-      <span class="icon">⚡</span> Test streams
+    <div class="nav-label" style="margin-top:8px">Importar / Exportar</div>
+    <div class="nav-item" onclick="setView('import')">
+      <span class="icon">📥</span> Importar M3U/JSON
     </div>
     <div class="nav-item" onclick="exportChannels()">
       <span class="icon">📤</span> Exportar JSON
     </div>
     <div class="nav-item" onclick="exportM3U()">
       <span class="icon">📋</span> Exportar M3U
+    </div>
+
+    <div class="nav-label" style="margin-top:8px">Herramientas</div>
+    <div class="nav-item" onclick="testAllStreams()">
+      <span class="icon">⚡</span> Testear todos los streams
     </div>
   </nav>
 
@@ -1204,6 +1239,14 @@ tbody td {
           <tr><td colspan="7"><div class="skeleton" style="height:52px;width:100%;margin:4px 0;border-radius:8px"></div></td></tr>
         </tbody>
       </table>
+    </div>
+
+
+    <!-- ══ CATEGORIES VIEW ══════════════════════════════════════════════════ -->
+    <div id="categories-view" style="display:none">
+      <div id="cats-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;padding:4px 0">
+        <!-- filled by JS -->
+      </div>
     </div>
 
     <!-- Import view -->
@@ -2017,7 +2060,63 @@ function download(blob, filename) {
 
 // ─── TEST STREAMS ────────────────────────────────────────────────────────────
 async function testAllStreams() {
-  showToast('info', '⚡ Testeando streams... (próximamente)');
+  if (!allChannels.length) { showToast('info', 'No hay canales cargados'); return; }
+  const active = allChannels.filter(c => c.streamUrl && c.status === 'active');
+  if (!active.length) { showToast('info', 'No hay canales activos con stream'); return; }
+
+  showToast('info', `⚡ Testeando ${active.length} streams...`);
+  let ok = 0, fail = 0;
+
+  for (const ch of active) {
+    const btn = document.getElementById('test-btn-' + ch._id);
+    if (btn) btn.textContent = '⏳';
+    try {
+      const r = await fetch(`${API}/api/categories/test-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ url: ch.streamUrl }),
+      });
+      const { data } = await r.json();
+      if (data.working) {
+        ok++;
+        if (btn) { btn.textContent = '✅'; btn.title = `OK (${data.statusCode})`; }
+      } else {
+        fail++;
+        if (btn) { btn.textContent = '❌'; btn.title = data.error || `Error ${data.statusCode}`; }
+        // Auto-desactivar si falla
+        // await toggleStatus(ch._id, 'active'); // descomenta si querés auto-desactivar
+      }
+    } catch {
+      fail++;
+      if (btn) { btn.textContent = '❌'; btn.title = 'Sin respuesta'; }
+    }
+  }
+  showToast(fail === 0 ? 'success' : 'info', `✅ ${ok} activos · ❌ ${fail} caídos`);
+}
+
+async function testSingleStream(id, url) {
+  if (!url) { showToast('error', 'Este canal no tiene stream URL'); return; }
+  const btn = document.getElementById('test-btn-' + id);
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+  try {
+    const r = await fetch(`${API}/api/categories/test-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+      body: JSON.stringify({ url }),
+    });
+    const { data } = await r.json();
+    if (btn) {
+      btn.textContent  = data.working ? '✅' : '❌';
+      btn.title = data.working ? `Online (${data.statusCode})` : (data.error || `HTTP ${data.statusCode}`);
+      btn.disabled = false;
+      setTimeout(() => { if (btn) { btn.textContent = '🔍'; btn.title = 'Testear stream'; } }, 8000);
+    }
+    showToast(data.working ? 'success' : 'error',
+      data.working ? `✅ Stream online (${data.statusCode})` : `❌ Stream caído: ${data.error || 'sin respuesta'}`);
+  } catch(e) {
+    if (btn) { btn.textContent = '❌'; btn.disabled = false; }
+    showToast('error', 'Error conectando con el servidor');
+  }
 }
 
 // ─── TOASTS ─────────────────────────────────────────────────────────────────
@@ -2045,14 +2144,15 @@ let currentView = 'channels';
 const VIEW_CONFIG = {
   channels: { title:'📺 Canales',    btn:'+ Nuevo canal',    load: ()=>loadChannels()  },
   movies:   { title:'🎬 Películas',  btn:'+ Nueva película', load: ()=>loadMovies()    },
-  series:   { title:'🎭 Series',     btn:'+ Nueva serie',    load: ()=>loadSeries()    },
-  import:   { title:'📥 Importar',   btn: null,              load: null                },
+  series:     { title:'🎭 Series',      btn:'+ Nueva serie',     load: ()=>loadSeries()     },
+  categories: { title:'🏷️ Categorías', btn:'+ Nueva categoría', load: ()=>loadCategoriesView() },
+  import:     { title:'📥 Importar',   btn: null,               load: null                     },
 };
 
 function setView(view) {
   currentView = view;
   const cfg = VIEW_CONFIG[view];
-  ['channels-view','movies-view','series-view','import-view'].forEach(id => {
+  ['channels-view','movies-view','series-view','categories-view','import-view'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -2076,9 +2176,10 @@ function reloadCurrentView() {
 }
 
 function openNew() {
-  if      (currentView==='movies') openNewMovie();
-  else if (currentView==='series') openNewSeries();
-  else                             openNewChannel();
+  if      (currentView==='movies')     openNewMovie();
+  else if (currentView==='series')     openNewSeries();
+  else if (currentView==='categories') openNewCategory();
+  else                                 openNewChannel();
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2421,6 +2522,153 @@ document.addEventListener('keydown', e => {
   if (e.key==='Escape') { closeModal(); closeMovieModal(); closeSeriesModal(); }
 });
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// CATEGORÍAS
+// ════════════════════════════════════════════════════════════════════════════
+let editingCatName = null;
+
+async function loadCategoriesView() {
+  const grid = document.getElementById('cats-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div style="color:var(--text2);font-size:14px">Cargando categorías...</div>';
+  document.getElementById('table-count').textContent = '';
+
+  try {
+    const r = await fetch(`${API}/api/categories`);
+    const { data } = await r.json();
+    const cats = data || [];
+
+    document.getElementById('nav-cats-count').textContent = cats.length;
+    document.getElementById('table-count').textContent = `${cats.length} categoría${cats.length !== 1 ? 's' : ''}`;
+
+    if (!cats.length) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <span class="empty-icon">🏷️</span>
+        <p>No hay categorías todavía</p>
+        <button class="btn btn-primary" onclick="openNewCategory()">+ Crear la primera</button>
+      </div>`;
+      return;
+    }
+
+    grid.innerHTML = cats.map(c => `
+      <div class="cat-card ${c.fromChannels ? 'cat-from-channels' : ''}">
+        <div class="cat-icon">${c.icon || '📺'}</div>
+        <div class="cat-info">
+          <div class="cat-name">${esc(c.name)}</div>
+          <div class="cat-count">${c.channelCount} canal${c.channelCount !== 1 ? 'es' : ''}</div>
+          ${c.description ? `<div class="cat-desc">${esc(c.description)}</div>` : ''}
+        </div>
+        <div class="cat-actions">
+          <button class="icon-btn icon-btn-edit" title="Editar" onclick="openEditCategory('${esc(c.name)}','${esc(c.icon||'📺')}','${esc(c.description||'')}')">✏️</button>
+          <button class="icon-btn icon-btn-delete" title="Eliminar (mueve canales a General)"
+            onclick="deleteCategory('${esc(c.name)}',${c.channelCount})"
+            ${c.name === 'General' ? 'disabled style="opacity:.3"' : ''}>🗑️</button>
+        </div>
+      </div>`
+    ).join('');
+
+  } catch(e) {
+    grid.innerHTML = '<div style="color:var(--red)">Error cargando categorías</div>';
+    showToast('error', 'No se pudieron cargar las categorías');
+  }
+}
+
+function openNewCategory() {
+  editingCatName = null;
+  document.getElementById('cat-modal-title').textContent = '🏷️ Nueva categoría';
+  document.getElementById('save-cat-btn').textContent = '💾 Crear categoría';
+  document.getElementById('fc-name').value = '';
+  document.getElementById('fc-icon').value = '📺';
+  document.getElementById('fc-desc').value = '';
+  document.getElementById('category-modal').classList.add('open');
+  setTimeout(() => document.getElementById('fc-name').focus(), 100);
+}
+
+function openEditCategory(name, icon, desc) {
+  editingCatName = name;
+  document.getElementById('cat-modal-title').textContent = `✏️ Editar: ${name}`;
+  document.getElementById('save-cat-btn').textContent = '💾 Guardar cambios';
+  document.getElementById('fc-name').value = name;
+  document.getElementById('fc-icon').value = icon;
+  document.getElementById('fc-desc').value = desc;
+  document.getElementById('category-modal').classList.add('open');
+}
+
+function closeCategoryModal() {
+  document.getElementById('category-modal').classList.remove('open');
+}
+
+async function saveCategory() {
+  const name = document.getElementById('fc-name').value.trim();
+  if (!name) { showToast('error', 'El nombre es obligatorio'); return; }
+
+  const payload = {
+    name,
+    icon: document.getElementById('fc-icon').value.trim() || '📺',
+    description: document.getElementById('fc-desc').value.trim(),
+  };
+
+  const btn = document.getElementById('save-cat-btn');
+  btn.innerHTML = '<span class="loading-spinner"></span> Guardando...';
+  btn.disabled = true;
+
+  try {
+    let r;
+    if (editingCatName) {
+      r = await fetch(`${API}/api/categories/${encodeURIComponent(editingCatName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      r = await fetch(`${API}/api/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify(payload),
+      });
+    }
+    const result = await r.json();
+    if (result.success) {
+      showToast('success', result.message || '✅ Categoría guardada');
+      closeCategoryModal();
+      loadCategoriesView();
+      loadCategories(); // actualizar chips de filtro en canales
+    } else {
+      showToast('error', result.message || 'Error guardando');
+    }
+  } catch(e) { showToast('error', 'Error de conexión'); }
+  finally { btn.innerHTML = '💾 Guardar'; btn.disabled = false; }
+}
+
+async function deleteCategory(name, channelCount) {
+  const msg = channelCount > 0
+    ? `¿Eliminar la categoría "${name}"?
+${channelCount} canal${channelCount>1?'es':''} serán movidos a "General".`
+    : `¿Eliminar la categoría "${name}"?`;
+  if (!confirm(msg)) return;
+
+  try {
+    const r = await fetch(`${API}/api/categories/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-key': adminKey },
+    });
+    const result = await r.json();
+    if (result.success) {
+      showToast('success', `🗑️ ${result.message}`);
+      loadCategoriesView();
+      loadCategories();
+    } else {
+      showToast('error', result.message);
+    }
+  } catch(e) { showToast('error', 'Error eliminando categoría'); }
+}
+
+// Cerrar modal categoría
+document.getElementById('category-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeCategoryModal();
+});
+
 </script>
 
 <!-- ═══════════ MOVIE MODAL ═══════════ -->
@@ -2540,6 +2788,35 @@ document.addEventListener('keydown', e => {
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeSeriesModal()">Cancelar</button>
       <button class="btn btn-primary" id="save-series-btn" onclick="saveSeries()">💾 Crear serie</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════ CATEGORY MODAL ═══════════ -->
+<div class="modal-overlay" id="category-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <h3 id="cat-modal-title">🏷️ Nueva categoría</h3>
+      <button class="modal-close" onclick="closeCategoryModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Nombre *</label>
+        <input type="text" class="form-input" id="fc-name" placeholder="Ej: Deportes">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icono (emoji)</label>
+        <input type="text" class="form-input" id="fc-icon" placeholder="⚽" maxlength="4" style="font-size:20px;width:80px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descripción</label>
+        <input type="text" class="form-input" id="fc-desc" placeholder="Canales de deportes en vivo">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeCategoryModal()">Cancelar</button>
+      <button class="btn btn-primary" id="save-cat-btn" onclick="saveCategory()">💾 Crear categoría</button>
     </div>
   </div>
 </div>
