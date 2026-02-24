@@ -1,10 +1,10 @@
 require('dotenv').config();
-const express  = require('express');
+const express = require('express');
 const mongoose = require('mongoose');
-const cors     = require('cors');
-const path     = require('path');
+const cors = require('cors');
+const path = require('path');
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ── Middleware ───────────────────────────────────────────────────────────────
@@ -23,26 +23,26 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => { console.error('❌  MongoDB:', err.message); process.exit(1); });
 
 // ── Rutas API ────────────────────────────────────────────────────────────────
-app.use('/api/auth',     require('./routes/auth'));
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/channels', require('./routes/channels'));
-app.use('/api/movies',   require('./routes/movies'));
-app.use('/api/series',   require('./routes/series'));
-app.use('/api/events',   require('./routes/events'));
+app.use('/api/movies', require('./routes/movies'));
+app.use('/api/series', require('./routes/series'));
+app.use('/api/events', require('./routes/events'));
 app.use('/api/categories', require('./routes/categories'));
 
 // ── Raíz ─────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.redirect('/admin'));
 
 app.get('/api', (req, res) => res.json({
-  name:    'Moon TV API',
+  name: 'Moon TV API',
   version: '3.0',
   endpoints: {
-    auth:     '/api/auth',
+    auth: '/api/auth',
     channels: '/api/channels',
-    movies:   '/api/movies',
-    series:   '/api/series',
-    events:   '/api/events',
-    admin:    '/admin',
+    movies: '/api/movies',
+    series: '/api/series',
+    events: '/api/events',
+    admin: '/admin',
   }
 }));
 

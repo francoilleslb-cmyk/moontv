@@ -1,24 +1,29 @@
 // routes/categories.js
-const express  = require('express');
-const router   = express.Router();
+const express = require('express');
+const router = express.Router();
 const Category = require('../models/Category');
-const Channel  = require('../models/Channel');
+const Channel = require('../models/Channel');
+const Movie = require('../models/Movie');
+const Series = require('../models/Series');
 const { adminAuth } = require('../middleware/auth');
-const http     = require('http');
-const https    = require('https');
+const http = require('http');
+const https = require('https');
 
 // ── GET /api/categories ──────────────────────────────────────────────────────
 // Devuelve categorías del modelo + las que existen en canales (union)
 router.get('/', async (req, res) => {
   try {
-    const [saved, fromChannels] = await Promise.all([
+    const [saved, fromCh, fromMo, fromSe] = await Promise.all([
       Category.find().sort({ sortOrder: 1, name: 1 }),
       Channel.distinct('category'),
+      Movie.distinct('category'),
+      Series.distinct('category'),
     ]);
 
-    // Unir ambas fuentes sin duplicados
+    const allFromUsage = [...new Set([...fromCh, ...fromMo, ...fromSe])];
     const savedNames = new Set(saved.map(c => c.name));
-    const extra = fromChannels
+
+    const extra = allFromUsage
       .filter(n => n && !savedNames.has(n))
       .map(n => ({ name: n, icon: '📺', description: '', _id: null, fromChannels: true }));
 
@@ -27,11 +32,17 @@ router.get('/', async (req, res) => {
       ...extra,
     ];
 
-    // Contar canales por categoría
-    const counts = await Channel.aggregate([
-      { $group: { _id: '$category', count: { $sum: 1 } } }
+    const [chCounts, moCounts, seCounts] = await Promise.all([
+      Channel.aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }]),
+      Movie.aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }]),
+      Series.aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }])
     ]);
-    const countMap = Object.fromEntries(counts.map(c => [c._id, c.count]));
+
+    const countMap = {};
+    const addCounts = (agg) => {
+      agg.forEach(c => { countMap[c._id] = (countMap[c._id] || 0) + c.count; });
+    };
+    addCounts(chCounts); addCounts(moCounts); addCounts(seCounts);
 
     const withCounts = all.map(c => ({
       ...c,
@@ -62,9 +73,13 @@ router.put('/:name', adminAuth, async (req, res) => {
     const oldName = decodeURIComponent(req.params.name);
     const { name, icon, description, sortOrder } = req.body;
 
-    // Si cambia el nombre, actualizar todos los canales que la usan
+    // Si cambia el nombre, actualizar todos los canales/modulos que la usan
     if (name && name !== oldName) {
-      await Channel.updateMany({ category: oldName }, { category: name.trim() });
+      await Promise.all([
+        Channel.updateMany({ category: oldName }, { category: name.trim() }),
+        Movie.updateMany({ category: oldName }, { category: name.trim() }),
+        Series.updateMany({ category: oldName }, { category: name.trim() })
+      ]);
     }
 
     const cat = await Category.findOneAndUpdate(
@@ -82,16 +97,27 @@ router.delete('/:name', adminAuth, async (req, res) => {
     const name = decodeURIComponent(req.params.name);
     if (name === 'General') return res.status(400).json({ success: false, message: 'No se puede eliminar la categoría General' });
 
-    // Mover todos los canales de esta categoría a "General"
-    const moved = await Channel.countDocuments({ category: name });
-    await Channel.updateMany({ category: name }, { category: 'General' });
+    // Mover todos los contenidos de esta categoría a "General"
+    const [movedCh, movedMo, movedSe] = await Promise.all([
+      Channel.countDocuments({ category: name }),
+      Movie.countDocuments({ category: name }),
+      Series.countDocuments({ category: name })
+    ]);
+
+    await Promise.all([
+      Channel.updateMany({ category: name }, { category: 'General' }),
+      Movie.updateMany({ category: name }, { category: 'General' }),
+      Series.updateMany({ category: name }, { category: 'General' })
+    ]);
+
+    const moved = movedCh + movedMo + movedSe;
 
     // Eliminar del modelo si existe
     await Category.findOneAndDelete({ name });
 
     res.json({
       success: true,
-      message: `Categoría "${name}" eliminada. ${moved} canal${moved !== 1 ? 'es' : ''} movido${moved !== 1 ? 's' : ''} a General`,
+      message: `Categoría "${name}" eliminada. ${moved} ítem${moved !== 1 ? 's' : ''} movido${moved !== 1 ? 's' : ''} a General`,
       movedCount: moved,
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

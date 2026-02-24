@@ -1,7 +1,7 @@
 // routes/movies.js
 const express = require('express');
-const router  = express.Router();
-const Movie   = require('../models/Movie');
+const router = express.Router();
+const Movie = require('../models/Movie');
 const { adminAuth } = require('../middleware/auth');
 
 router.use(adminAuth);
@@ -11,7 +11,7 @@ router.get('/search', async (req, res) => {
     const { q = '' } = req.query;
     const movies = await Movie.find({
       status: 'active',
-      $or: [{ title: { $regex: q, $options: 'i' } }, { genre: { $regex: q, $options: 'i' } }],
+      $or: [{ title: { $regex: q, $options: 'i' } }, { category: { $regex: q, $options: 'i' } }],
     }).limit(30);
     res.json({ success: true, data: movies });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -19,9 +19,9 @@ router.get('/search', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 20, genre, all } = req.query;
+    const { page = 1, limit = 20, category, all } = req.query;
     const filter = all ? {} : { status: 'active' };
-    if (genre) filter.genre = genre;
+    if (category) filter.category = category;
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [movies, total] = await Promise.all([
       Movie.find(filter).sort({ sortOrder: 1, createdAt: -1 }).skip(skip).limit(+limit),
