@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎬 Agregar Posters TMDB — Moon TV</title>
+<style>
+  :root {
+    --bg: #080c10; --bg2: #0e1318; --bg3: #141b22;
+    --border: #1e2a35; --border2: #263040;
+    --accent: #00c2ff; --green: #00e676; --red: #ff4444; --yellow: #ffd600;
+    --text: #e8f0f8; --text2: #7a9bb5; --text3: #3d5570;
+    --font: system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); padding: 24px; min-height: 100vh; }
+  h1 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+  .subtitle { color: var(--text2); font-size: 14px; margin-bottom: 28px; }
+  .card { background: var(--bg2); border: 1px solid var(--border2); border-radius: 14px; padding: 24px; margin-bottom: 20px; }
+  .card h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; color: var(--accent); }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--text2); margin-bottom: 6px; }
+  input[type=text], input[type=file] {
+    width: 100%; background: var(--bg3); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 10px 14px; color: var(--text);
+    font-size: 14px; font-family: monospace; outline: none;
+    transition: .15s; margin-bottom: 14px;
+  }
+  input:focus { border-color: var(--accent); }
+  .btn {
+    padding: 10px 20px; border-radius: 8px; border: none;
+    font-family: var(--font); font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: .15s; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: #33cfff; }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-green { background: var(--green); color: #000; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border2); color: var(--text2); }
+  .progress-bar-wrap { background: var(--bg3); border-radius: 999px; height: 8px; margin: 12px 0; overflow: hidden; }
+  .progress-bar { height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s; width: 0%; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+  .stat { background: var(--bg3); border-radius: 8px; padding: 10px 14px; text-align: center; }
+  .stat .val { font-size: 22px; font-weight: 800; }
+  .stat .lbl { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .val.green { color: var(--green); } .val.red { color: var(--red); } .val.yellow { color: var(--yellow); }
+  #log { background: var(--bg3); border-radius: 8px; padding: 12px; max-height: 260px; overflow-y: auto;
+         font-family: monospace; font-size: 12px; line-height: 1.8; margin-top: 14px; }
+  .log-ok { color: var(--green); } .log-miss { color: var(--yellow); } .log-err { color: var(--red); }
+  .tip { background: rgba(0,194,255,.07); border: 1px solid rgba(0,194,255,.2);
+         border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--text2); margin-bottom: 16px; }
+  .tip a { color: var(--accent); }
+  .grid-preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 12px; max-height: 300px; overflow-y: auto; }
+  .poster-thumb { border-radius: 6px; overflow: hidden; background: var(--bg3); aspect-ratio: 2/3; position: relative; }
+  .poster-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .poster-thumb .title-lbl { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.7); font-size: 9px; padding: 3px 4px; line-height: 1.3; }
+  .poster-thumb.no-poster { border: 1px dashed var(--border2); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; color: var(--text3); font-size: 10px; }
+</style>
+</head>
+<body>
+
+<h1>🎬 Agregar Posters TMDB</h1>
+<p class="subtitle">Enriquece tus archivos JSON de películas y series con posters automáticamente</p>
+
+<div class="card">
+  <h2>🔑 Paso 1 — API Key de TMDB (gratis)</h2>
+  <div class="tip">
+    Necesitás una API Key gratuita de TMDB:<br>
+    1. Creá una cuenta en <a href="https://www.themoviedb.org/signup" target="_blank">themoviedb.org</a><br>
+    2. Andá a <strong>Configuración → API → Crear API Key</strong> (elegí "Uso personal")<br>
+    3. Copiá la <strong>API Key (v3 auth)</strong> y pegala acá 👇
+  </div>
+  <label>Tu TMDB API Key</label>
+  <input type="text" id="api-key" placeholder="ej: a1b2c3d4e5f6..." />
+  <button class="btn btn-ghost" onclick="testApiKey()">🔍 Verificar clave</button>
+  <span id="key-status" style="margin-left:10px;font-size:13px"></span>
+</div>
+
+<div class="card">
+  <h2>📂 Paso 2 — Cargar tu archivo JSON</h2>
+  <div class="tip">
+    Cargá uno de los archivos: <strong>peliculas.json</strong>, <strong>peliculas_terror.json</strong> o <strong>series.json</strong>
+  </div>
+  <label>Archivo JSON</label>
+  <input type="file" id="json-file" accept=".json" onchange="loadFile(event)" />
+  <div id="file-info" style="display:none;color:var(--green);font-size:13px;margin-bottom:12px"></div>
+</div>
+
+<div class="card" id="card-enrich" style="display:none">
+  <h2>🚀 Paso 3 — Buscar posters</h2>
+  <div class="stats">
+    <div class="stat"><div class="val" id="s-total">0</div><div class="lbl">Total</div></div>
+    <div class="stat"><div class="val green" id="s-found">0</div><div class="lbl">Con poster ✅</div></div>
+    <div class="stat"><div class="val yellow" id="s-miss">0</div><div class="lbl">Sin resultado</div></div>
+    <div class="stat"><div class="val red" id="s-err">0</div><div class="lbl">Errores</div></div>
+    <div class="stat"><div class="val" id="s-pct">0%</div><div class="lbl">Completado</div></div>
+  </div>
+  <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+    <button class="btn btn-primary" id="btn-start" onclick="startEnrich()">🎬 Iniciar búsqueda de posters</button>
+    <button class="btn btn-ghost" id="btn-stop" onclick="stopEnrich()" style="display:none">⏹️ Detener</button>
+    <button class="btn btn-green" id="btn-download" onclick="downloadResult()" style="display:none">⬇️ Descargar JSON enriquecido</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<div class="card" id="card-preview" style="display:none">
+  <h2>🖼️ Vista previa de posters encontrados</h2>
+  <div class="grid-preview" id="poster-grid"></div>
+</div>
+
+<script>
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const IMG_BASE  = 'https://image.tmdb.org/t/p/w500';
+let jsonData = [];
+let enriched = [];
+let stopFlag = false;
+let fileType = 'movie'; // 'movie' or 'series'
+
+async function testApiKey() {
+  const key = document.getElementById('api-key').value.trim();
+  const el = document.getElementById('key-status');
+  if (!key) { el.textContent = '⚠️ Ingresá la clave'; el.style.color = '#ffd600'; return; }
+  el.textContent = '⏳ Verificando...'; el.style.color = '#7a9bb5';
+  try {
+    const r = await fetch(`${TMDB_BASE}/configuration?api_key=${key}`);
+    if (r.ok) { el.textContent = '✅ Clave válida'; el.style.color = '#00e676'; }
+    else       { el.textContent = '❌ Clave inválida'; el.style.color = '#ff4444'; }
+  } catch { el.textContent = '❌ Error de red'; el.style.color = '#ff4444'; }
+}
+
+function loadFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      jsonData = JSON.parse(e.target.result);
+      if (!Array.isArray(jsonData)) throw new Error('No es un array');
+      // Detect type
+      fileType = jsonData[0]?.seasons !== undefined ? 'series' : 'movie';
+      const alreadyHave = jsonData.filter(x => x.poster || x.logo).length;
+      document.getElementById('file-info').style.display = 'block';
+      document.getElementById('file-info').textContent =
+        `✅ ${jsonData.length} entradas cargadas · Tipo: ${fileType === 'series' ? 'Series' : 'Películas'} · ${alreadyHave} ya tienen poster`;
+      document.getElementById('s-total').textContent = jsonData.length;
+      document.getElementById('card-enrich').style.display = 'block';
+      enriched = jsonData.map(x => ({...x}));
+    } catch(err) {
+      document.getElementById('file-info').style.display = 'block';
+      document.getElementById('file-info').style.color = '#ff4444';
+      document.getElementById('file-info').textContent = `❌ Error: ${err.message}`;
+    }
+  };
+  reader.readAsText(file);
+}
+
+function logLine(cls, msg) {
+  const log = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = msg;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+function updateStats(found, miss, err, total) {
+  document.getElementById('s-found').textContent = found;
+  document.getElementById('s-miss').textContent  = miss;
+  document.getElementById('s-err').textContent   = err;
+  const done = found + miss + err;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('s-pct').textContent = pct + '%';
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+async function searchTMDB(title, year, type, apiKey) {
+  const endpoint = type === 'series' ? 'tv' : 'movie';
+  let url = `${TMDB_BASE}/search/${endpoint}?api_key=${apiKey}&language=es-ES&query=${encodeURIComponent(title)}`;
+  if (year && type === 'movie') url += `&year=${year}`;
+
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const data = await r.json();
+
+  if (data.results && data.results.length > 0) {
+    const res = data.results[0];
+    const posterPath = res.poster_path;
+    return posterPath ? IMG_BASE + posterPath : null;
+  }
+
+  // If no results with year, retry without year
+  if (year && type === 'movie') {
+    const r2 = await fetch(`${TMDB_BASE}/search/movie?api_key=${apiKey}&language=es-ES&query=${encodeURIComponent(title)}`);
+    const d2 = await r2.json();
+    if (d2.results && d2.results.length > 0 && d2.results[0].poster_path) {
+      return IMG_BASE + d2.results[0].poster_path;
+    }
+    // Try English title search (some Spanish titles differ)
+    const r3 = await fetch(`${TMDB_BASE}/search/movie?api_key=${apiKey}&language=en-US&query=${encodeURIComponent(title)}`);
+    const d3 = await r3.json();
+    if (d3.results && d3.results.length > 0 && d3.results[0].poster_path) {
+      return IMG_BASE + d3.results[0].poster_path;
+    }
+  }
+
+  return null;
+}
+
+async function startEnrich() {
+  const key = document.getElementById('api-key').value.trim();
+  if (!key) { alert('Ingresá tu TMDB API Key primero'); return; }
+  if (!jsonData.length) { alert('Cargá un archivo JSON primero'); return; }
+
+  stopFlag = false;
+  document.getElementById('btn-start').style.display = 'none';
+  document.getElementById('btn-stop').style.display = '';
+  document.getElementById('btn-download').style.display = 'none';
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('poster-grid').innerHTML = '';
+  document.getElementById('card-preview').style.display = 'none';
+
+  let found = 0, miss = 0, err = 0;
+  const total = enriched.length;
+  const posterGrid = document.getElementById('poster-grid');
+
+  for (let i = 0; i < enriched.length; i++) {
+    if (stopFlag) { logLine('log-err', '⏹️ Detenido por el usuario'); break; }
+
+    const item = enriched[i];
+    const title = item.title;
+    const year  = item.year || null;
+
+    // Skip if already has poster
+    if (item.poster && item.poster.startsWith('http')) {
+      found++;
+      updateStats(found, miss, err, total);
+      continue;
+    }
+
+    try {
+      const posterUrl = await searchTMDB(title, year, fileType, key);
+      if (posterUrl) {
+        item.poster = posterUrl;
+        if (fileType === 'series') item.logo = posterUrl;
+        found++;
+        logLine('log-ok', `✅ [${i+1}/${total}] ${title} → poster encontrado`);
+
+        // Add to preview grid
+        const thumb = document.createElement('div');
+        thumb.className = 'poster-thumb';
+        thumb.innerHTML = `<img src="${posterUrl}" loading="lazy"><div class="title-lbl">${title}</div>`;
+        posterGrid.appendChild(thumb);
+        document.getElementById('card-preview').style.display = 'block';
+      } else {
+        miss++;
+        logLine('log-miss', `⚠️ [${i+1}/${total}] ${title} — sin resultado`);
+        const thumb = document.createElement('div');
+        thumb.className = 'poster-thumb no-poster';
+        thumb.innerHTML = `<span>🎬</span><span>${title.substring(0,20)}</span>`;
+        posterGrid.appendChild(thumb);
+      }
+    } catch(e) {
+      err++;
+      logLine('log-err', `❌ [${i+1}/${total}] ${title} — ${e.message}`);
+    }
+
+    updateStats(found, miss, err, total);
+
+    // Rate limiting: TMDB allows ~40 req/10s, wait 300ms between requests
+    await new Promise(r => setTimeout(r, 280));
+  }
+
+  document.getElementById('btn-stop').style.display = 'none';
+  document.getElementById('btn-start').style.display = '';
+  document.getElementById('btn-download').style.display = '';
+  logLine('log-ok', `\n🎉 Listo! ${found} posters encontrados de ${total} entradas`);
+}
+
+function stopEnrich() { stopFlag = true; }
+
+function downloadResult() {
+  const filename = fileType === 'series' ? 'series_con_posters.json' : 'peliculas_con_posters.json';
+  const blob = new Blob([JSON.stringify(enriched, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
