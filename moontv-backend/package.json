@@ -4,7 +4,7 @@
   "description": "Moon TV — Backend completo con panel de administración",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node seed_series.js && node server.js",
     "dev": "nodemon server.js"
   },
   "dependencies": {
