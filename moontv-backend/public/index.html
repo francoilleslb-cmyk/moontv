@@ -1120,6 +1120,7 @@ tbody td {
       <input type="text" id="search-input" placeholder="Buscar..." oninput="debounceSearch()">
     </div>
     <button class="btn btn-ghost" id="btn-reload" onclick="reloadCurrentView()">↻ Recargar</button>
+    <button class="btn btn-danger" id="btn-delete-all" onclick="deleteAll()" style="display:none">🗑️ Borrar todo</button>
     <button class="btn btn-primary" id="btn-new" onclick="openNew()">+ Nuevo canal</button>
   </div>
 
@@ -2250,6 +2251,8 @@ function setView(view) {
   if (t) t.style.display = 'block';
   document.getElementById('filters-bar').style.display  = view==='channels' ? 'flex' : 'none';
   document.getElementById('stats-row').style.display    = view==='channels' ? 'grid' : 'none';
+  const btnDel = document.getElementById('btn-delete-all');
+  if (btnDel) btnDel.style.display = ['channels','movies','series'].includes(view) ? '' : 'none';
   document.getElementById('view-title').textContent     = cfg.title;
   const btnNew = document.getElementById('btn-new');
   if (cfg.btn) { btnNew.textContent = cfg.btn; btnNew.style.display=''; }
@@ -2273,15 +2276,32 @@ function openNew() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// BULK DELETE
+// BULK DELETE — funciona para canales, películas y series
 // ════════════════════════════════════════════════════════════════════════════
+
+const VIEW_LABELS = {
+  channels: { single: 'canal',    plural: 'canales',    api: 'channels' },
+  movies:   { single: 'película', plural: 'películas',  api: 'movies'   },
+  series:   { single: 'serie',    plural: 'series',     api: 'series'   },
+};
+
+function getChecked() {
+  const tbody = {
+    channels: '#channels-tbody',
+    movies:   '#movies-tbody',
+    series:   '#series-tbody',
+  }[currentView] || '#channels-tbody';
+  return [...document.querySelectorAll(`${tbody} .row-check:checked`)];
+}
+
 function onCheckChange() {
-  const checked = document.querySelectorAll('#channels-tbody .row-check:checked');
+  const checked = getChecked();
   const bulkBar = document.getElementById('bulk-bar');
+  const lbl = VIEW_LABELS[currentView] || VIEW_LABELS.channels;
   if (checked.length > 0) {
     bulkBar.style.display = 'flex';
     document.getElementById('bulk-count').textContent =
-      `${checked.length} canal${checked.length>1?'es':''} seleccionado${checked.length>1?'s':''}`;
+      `${checked.length} ${checked.length>1 ? lbl.plural : lbl.single} seleccionado${checked.length>1?'s':''}`;
   } else {
     bulkBar.style.display = 'none';
   }
@@ -2289,28 +2309,63 @@ function onCheckChange() {
 
 function clearSelection() {
   document.querySelectorAll('.row-check').forEach(c => c.checked = false);
-  const sa = document.getElementById('select-all');
-  if (sa) sa.checked = false;
+  ['select-all','select-all-movies','select-all-series'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  });
   const b = document.getElementById('bulk-bar');
   if (b) b.style.display = 'none';
 }
 
 async function deleteSelected() {
-  const checked = [...document.querySelectorAll('#channels-tbody .row-check:checked')];
+  const checked = getChecked();
   if (!checked.length) return;
-  if (!confirm(`¿Eliminar ${checked.length} canales? No se puede deshacer.`)) return;
+  const lbl = VIEW_LABELS[currentView] || VIEW_LABELS.channels;
+  if (!confirm(`¿Eliminar ${checked.length} ${checked.length>1?lbl.plural:lbl.single}? No se puede deshacer.`)) return;
   const ids = checked.map(c => c.dataset.id);
   let ok = 0, fail = 0;
   for (const id of ids) {
     try {
-      const r = await fetch(`${API}/api/channels/${id}`,
+      const r = await fetch(`${API}/api/${lbl.api}/${id}`,
         { method:'DELETE', headers:{'x-admin-key':adminKey} });
       const res = await r.json();
       if (res.success) ok++; else fail++;
     } catch { fail++; }
   }
-  clearSelection(); loadChannels(); loadStats();
-  if (fail===0) showToast('success',`🗑️ ${ok} canal${ok>1?'es':''} eliminado${ok>1?'s':''}`);
+  clearSelection();
+  if (currentView==='movies') loadMovies();
+  else if (currentView==='series') loadSeries();
+  else { loadChannels(); loadStats(); }
+  if (fail===0) showToast('success',`🗑️ ${ok} ${ok>1?lbl.plural:lbl.single} eliminado${ok>1?'s':''}`);
+  else showToast('info',`✅ ${ok} eliminados, ❌ ${fail} con error`);
+}
+
+async function deleteAll() {
+  const lbl = VIEW_LABELS[currentView] || VIEW_LABELS.channels;
+  const count = currentView==='movies' ? allMovies.length
+              : currentView==='series' ? allSeriesData.length
+              : allChannels.length;
+  if (!count) { showToast('info', `No hay ${lbl.plural} para borrar`); return; }
+  if (!confirm(`⚠️ ¿Eliminar TODOS los ${count} ${lbl.plural}? Esta acción NO se puede deshacer.`)) return;
+  if (!confirm(`Confirmación final: ¿Borrar los ${count} ${lbl.plural} permanentemente?`)) return;
+
+  showToast('info', `🗑️ Borrando ${count} ${lbl.plural}...`);
+  const items = currentView==='movies' ? allMovies
+              : currentView==='series' ? allSeriesData
+              : allChannels;
+  let ok = 0, fail = 0;
+  for (const item of items) {
+    try {
+      const r = await fetch(`${API}/api/${lbl.api}/${item._id}`,
+        { method:'DELETE', headers:{'x-admin-key':adminKey} });
+      const res = await r.json();
+      if (res.success) ok++; else fail++;
+    } catch { fail++; }
+  }
+  if (currentView==='movies') loadMovies();
+  else if (currentView==='series') loadSeries();
+  else { loadChannels(); loadStats(); }
+  if (fail===0) showToast('success',`🗑️ ${ok} ${lbl.plural} eliminados`);
   else showToast('info',`✅ ${ok} eliminados, ❌ ${fail} con error`);
 }
 
@@ -2367,6 +2422,10 @@ function renderMoviesTable(movies) {
       </div></td>
     </tr>`;
   }).join('');
+
+  // Wire up checkbox change events for movies
+  document.querySelectorAll('#movies-tbody .row-check').forEach(cb =>
+    cb.addEventListener('change', onCheckChange));
 }
 
 function openNewMovie() {
@@ -2507,6 +2566,10 @@ function renderSeriesTable(series) {
       </div></td>
     </tr>`;
   }).join('');
+
+  // Wire up checkbox change events for series
+  document.querySelectorAll('#series-tbody .row-check').forEach(cb =>
+    cb.addEventListener('change', onCheckChange));
 }
 
 function openNewSeries() {
@@ -2596,9 +2659,11 @@ function toggleSelectAll(cb) {
 }
 function toggleSelectAllMovies(cb) {
   document.querySelectorAll('#movies-tbody .row-check').forEach(c => c.checked = cb.checked);
+  onCheckChange();
 }
 function toggleSelectAllSeries(cb) {
   document.querySelectorAll('#series-tbody .row-check').forEach(c => c.checked = cb.checked);
+  onCheckChange();
 }
 
 // Cerrar modals con ESC y click overlay
