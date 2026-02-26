@@ -61,12 +61,22 @@ router.patch('/:id/status', async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
-router.delete('/:id', async (req, res) => {
+// 🗑️ BORRAR TODAS LAS SERIES (solo admin)
+router.delete('/delete-all', async (req, res) => {
   try {
-    const s = await Series.findByIdAndDelete(req.params.id);
-    if (!s) return res.status(404).json({ success: false, message: 'No encontrada' });
-    res.json({ success: true, message: `"${s.title}" eliminada` });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    // Opción 1: Borrar SOLO las activas (más seguro)
+    // const result = await Series.deleteMany({ status: 'active' });
+    
+    // Opción 2: Borrar ABSOLUTAMENTE TODO (¡cuidado!)
+    const result = await Series.deleteMany({});
+    
+    res.json({ 
+      success: true, 
+      message: `Se eliminaron ${result.deletedCount} series`,
+      deletedCount: result.deletedCount 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
-
 module.exports = router;
