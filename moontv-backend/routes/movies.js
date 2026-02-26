@@ -6,6 +6,7 @@ const { adminAuth } = require('../middleware/auth');
 
 router.use(adminAuth);
 
+// 🔍 BÚSQUEDA
 router.get('/search', async (req, res) => {
   try {
     const { q = '' } = req.query;
@@ -17,6 +18,37 @@ router.get('/search', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// 🗑️ BORRAR TODAS LAS PELÍCULAS (endpoint específico - va ANTES de /:id)
+router.delete('/delete-all', async (req, res) => {
+  try {
+    const { confirm, all } = req.query;
+    
+    // 🔐 Seguridad: requerir confirmación explícita
+    if (confirm !== 'true') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Requiere ?confirm=true para ejecutar el borrado masivo' 
+      });
+    }
+    
+    // Si all=true borra TODO, si no, solo las activas (más seguro)
+    const filter = all === 'true' ? {} : { status: 'active' };
+    const result = await Movie.deleteMany(filter);
+    
+    console.log(`🗑️ Eliminadas ${result.deletedCount} películas`);
+    
+    res.json({ 
+      success: true, 
+      message: `Se eliminaron ${result.deletedCount} películas`,
+      deletedCount: result.deletedCount 
+    });
+  } catch (err) {
+    console.error('❌ Error en DELETE /delete-all movies:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 📋 LISTAR TODAS
 router.get('/', async (req, res) => {
   try {
     const { page = 1, limit = 20, category, all } = req.query;
@@ -31,6 +63,7 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// 🔎 GET BY ID (va AL FINAL para no interferir con rutas específicas)
 router.get('/:id', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
@@ -39,6 +72,7 @@ router.get('/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ➕ CREAR
 router.post('/', async (req, res) => {
   try {
     const movie = await Movie.create(req.body);
@@ -46,6 +80,7 @@ router.post('/', async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
+// ✏️ ACTUALIZAR
 router.put('/:id', async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -54,6 +89,7 @@ router.put('/:id', async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
+// 🔄 CAMBIAR STATUS
 router.patch('/:id/status', async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
@@ -61,22 +97,13 @@ router.patch('/:id/status', async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
-// 🗑️ BORRAR TODAS LAS PELÍCULAS (solo admin)
-router.delete('/delete-all', async (req, res) => {
+// ❌ BORRAR UNA (va al final)
+router.delete('/:id', async (req, res) => {
   try {
-    // Opción 1: Borrar SOLO las activas (más seguro)
-    // const result = await Movie.deleteMany({ status: 'active' });
-    
-    // Opción 2: Borrar ABSOLUTAMENTE TODO (¡cuidado!)
-    const result = await Movie.deleteMany({});
-    
-    res.json({ 
-      success: true, 
-      message: `Se eliminaron ${result.deletedCount} películas`,
-      deletedCount: result.deletedCount 
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+    const movie = await Movie.findByIdAndDelete(req.params.id);
+    if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
+    res.json({ success: true, message: `"${movie.title}" eliminada` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+
 module.exports = router;
