@@ -6,31 +6,28 @@ const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 };
 
-// Entra a la página de cada película y saca sinopsis, categoría y año limpio
 async function scrapeDetalle(url) {
   try {
     const { data } = await axios.get(url, { headers: HEADERS, timeout: 10000 });
     const $ = cheerio.load(data);
 
-    // Selectores comunes en Cuevana/clones
     const description = $(
       '.synopsis p, .Description p, .sinopsis p, [itemprop="description"], .info-content p'
     ).first().text().trim();
 
-    const category = $(
+    const genre = $(
       '.genres a, .Genres a, .genre a, [itemprop="genre"]'
-    ).first().text().trim() || 'Películas';
+    ).first().text().trim() || '';
 
-    // Año limpio desde la página de detalle
     const yearText = $(
       '.year, .Year, [itemprop="dateCreated"], .date'
     ).first().text().trim();
     const yearMatch = yearText.match(/\b(20\d{2}|19\d{2})\b/);
     const year = yearMatch ? parseInt(yearMatch[0]) : null;
 
-    return { description, category, year };
+    return { description, genre, year };
   } catch {
-    return { description: '', category: 'Películas', year: null };
+    return { description: '', genre: '', year: null };
   }
 }
 
@@ -44,9 +41,8 @@ async function runScraper() {
     });
     
     const $ = cheerio.load(data);
-
-    // ✅ Paso 1: recolectar síncronamente
     const peliculas = [];
+
     $('a').each((i, el) => {
       const link   = $(el).attr('href');
       const img    = $(el).find('img');
@@ -54,27 +50,25 @@ async function runScraper() {
       const title  = img.attr('alt') || $(el).find('h2').text().trim();
 
       if (!link || !title || !poster) return;
-      if (title.length < 2) return; // Ignorar títulos vacíos o íconos
+      if (title.length < 2) return;
+
+      // Filtrar series y basura
+      if (/\d+x\d+/i.test(title)) return;
+      if (/logo|banner|icon/i.test(title)) return;
 
       const fullUrl = link.startsWith('http') ? link : `https://cuevana.bi${link}`;
       let fullPoster = poster.startsWith('//') ? `https:${poster}` : poster;
       if (!fullPoster.startsWith('http')) fullPoster = `https://cuevana.bi${fullPoster}`;
 
-      // ✅ Regex corregido — captura el año completo
+      // Limpiar año del título
       const yearMatch = title.match(/\b(20\d{2}|19\d{2})\b/);
       const yearFromTitle = yearMatch ? parseInt(yearMatch[0]) : null;
       const cleanTitle = yearMatch 
         ? title.replace(yearMatch[0], '').replace(/\s*-\s*/g, ' ').trim()
         : title.trim();
 
-      // Evitar duplicados en el array
       if (!peliculas.find(p => p.url === fullUrl)) {
-        peliculas.push({ 
-          url: fullUrl, 
-          title: cleanTitle, 
-          poster: fullPoster, 
-          yearFromTitle 
-        });
+        peliculas.push({ url: fullUrl, title: cleanTitle, poster: fullPoster, yearFromTitle });
       }
     });
 
@@ -85,21 +79,20 @@ async function runScraper() {
 
     console.log(`📦 Encontradas: ${peliculas.length} películas. Obteniendo detalles...`);
 
-    // ✅ Paso 2: entrar a cada película para sacar sinopsis y categoría
     let mCount = 0;
     for (const p of peliculas) {
       const detalle = await scrapeDetalle(p.url);
-
-      const finalYear = detalle.year || p.yearFromTitle || 2025;
+      const finalYear = detalle.year || p.yearFromTitle || new Date().getFullYear();
 
       try {
         await Movie.updateOne(
-          { sourceUrl: p.url },
+          { streamUrl: p.url },
           { $set: { 
               title:       p.title, 
-              sourceUrl:   p.url, 
+              streamUrl:   p.url,
               poster:      p.poster,
-              category:    detalle.category,
+              genre:       detalle.genre,
+              category:    'Películas',
               status:      'active',
               year:        finalYear,
               description: detalle.description || 'Sin sinopsis disponible.'
@@ -107,12 +100,11 @@ async function runScraper() {
           { upsert: true }
         );
         mCount++;
-        console.log(`✅ [${mCount}] ${p.title} (${finalYear}) - ${detalle.category}`);
+        console.log(`✅ [${mCount}] ${p.title} (${finalYear})`);
       } catch (err) {
         console.error(`❌ Error guardando "${p.title}":`, err.message);
       }
 
-      // Delay entre requests para no banear la IP
       await new Promise(r => setTimeout(r, 800));
     }
 
