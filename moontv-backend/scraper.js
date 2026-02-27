@@ -4,11 +4,13 @@ const Movie = require('./models/Movie');
 const Event = require('./models/Event');
 
 async function runScraper() {
-  console.log("🚀 [Scraper] Iniciando actualización desde Cuevana.bi...");
+  console.log("🚀 [Scraper] Iniciando actualización desde Cuevana...");
   try {
-    const { data } = await axios.get('https://cuevana.bi/peliculas', {
+    // Intentamos con la sección de estrenos que es más estable
+    const { data } = await axios.get('https://cuevana.bi/estrenos', {
       headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept-Language': 'es-ES,es;q=0.9'
       },
       timeout: 15000
     });
@@ -16,20 +18,23 @@ async function runScraper() {
     const $ = cheerio.load(data);
     let count = 0;
 
-    // Seleccionamos los elementos y los convertimos en un array para iterar
-    const items = $('.item, .ml-item, .movie').toArray();
-    
-    for (const el of items) {
-      const title = $(el).find('h2, .title, .entry-title').text().trim();
+    // Selector ultra-preciso para Cuevana: busca los artículos de películas
+    $('ul.movies-list li, .item, .xxx-item').each(async (i, el) => {
+      const title = $(el).find('h2').text().trim() || $(el).find('.title').text().trim();
       const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
-      const sourceUrl = $(el).find('a').attr('href');
+      let sourceUrl = $(el).find('a').attr('href');
 
       if (title && sourceUrl) {
+        // Aseguramos que la URL sea completa
+        if (!sourceUrl.startsWith('http')) {
+            sourceUrl = `https://cuevana.bi${sourceUrl}`;
+        }
+
         const movieData = {
           title: title,
           poster: poster,
           backdrop: poster,
-          description: "Sincronizado automáticamente desde Cuevana",
+          description: "Estreno sincronizado automáticamente.",
           genre: "Película",
           category: "Estrenos",
           year: 2026,
@@ -38,15 +43,14 @@ async function runScraper() {
           provider: "cuevana"
         };
 
-        // Aquí usamos el await correctamente dentro de la función async runScraper
         await Movie.updateOne({ title: title }, { $set: movieData }, { upsert: true });
         count++;
       }
-    }
+    });
 
-    console.log(`✅ [Scraper] Proceso terminado. ${count} películas sincronizadas.`);
+    // Pequeño delay para que los logs alcancen a mostrar el conteo real
+    setTimeout(() => console.log(`✅ [Scraper] Películas encontradas: ${count}`), 2000);
     
-    // Llamamos a la parte de deportes
     await runDeportesScraper();
 
   } catch (e) {
@@ -60,8 +64,9 @@ async function runDeportesScraper() {
       headers: { 'User-Agent': 'Mozilla/5.0' }
     });
     const $ = cheerio.load(data);
+    
+    // Usamos un bucle tradicional para evitar cierres prematuros
     const links = $('a').toArray();
-
     for (const el of links) {
       const eventTitle = $(el).text().trim();
       const eventLink = $(el).attr('href');
