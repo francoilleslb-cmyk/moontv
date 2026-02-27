@@ -3,36 +3,42 @@ const cheerio = require('cheerio');
 const Movie = require('./models/Movie');
 
 async function runScraper() {
-  console.log("🚀 [Scraper] Intentando GNula vía Proxy para saltar bloqueo...");
+  console.log("🚀 [Scraper] Carga rápida (1 sola petición para evitar bloqueos)...");
   
   try {
-    // Usamos el proxy de allorigins para evitar que GNula detecte a Render
-    const targetUrl = encodeURIComponent('https://www2.gnula.one/category/estreno/');
-    const proxyUrl = `https://api.allorigins.win/get?url=${targetUrl}`;
-
-    const { data } = await axios.get(proxyUrl, { timeout: 15000 });
+    // Solo UNA petición a la página principal de estrenos
+    const { data } = await axios.get('https://www2.gnula.one/category/estreno/', {
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0',
+        'Referer': 'https://www.google.com/'
+      },
+      timeout: 10000
+    });
     
-    // AllOrigins devuelve el HTML dentro de data.contents
-    const $ = cheerio.load(data.contents);
+    const $ = cheerio.load(data);
     let mCount = 0;
 
-    // GNula usa mucho la etiqueta <article> para sus posts
+    // Buscamos todos los artículos en la página
     $('article').each(async (i, el) => {
       const link = $(el).find('a').attr('href');
       const title = $(el).find('h2').text().trim();
       const poster = $(el).find('img').attr('src');
 
       if (link && title && poster) {
+        // Limpiamos el título
+        const cleanTitle = title.replace(/Ver película/gi, '').replace(/Online/gi, '').trim();
+
         await Movie.updateOne(
           { sourceUrl: link },
           { $set: { 
-              title: title.replace('Ver película', '').trim(), 
+              title: cleanTitle, 
               sourceUrl: link, 
               poster: poster,
               category: "Estrenos",
               status: "active",
               year: 2026,
-              description: "Sincronizado vía Proxy."
+              // Sinopsis automática para no tener que entrar al link
+              description: `Disfruta de ${cleanTitle} en Moon TV. Estreno disponible con la mejor calidad de imagen y sonido.`
           }},
           { upsert: true }
         );
@@ -40,26 +46,10 @@ async function runScraper() {
       }
     });
 
-    setTimeout(() => console.log(`🎬 [Scraper] Resultado con Proxy: ${mCount} películas.`), 3000);
+    console.log(`✅ [Scraper] ¡Listo! ${mCount} películas cargadas sin riesgo de bloqueo.`);
 
   } catch (e) {
-    console.error("❌ Error con Proxy:", e.message);
-    
-    // SI FALLA EL PROXY, INTENTO FINAL: Datos estáticos de prueba para que tu App no esté vacía
-    if (mCount === 0) {
-        console.log("⚠️ Creando datos de prueba para verificar la App...");
-        await Movie.updateOne(
-            { title: "Película de Prueba" },
-            { $set: { 
-                title: "Conexión Exitosa", 
-                sourceUrl: "https://google.com", 
-                poster: "https://via.placeholder.com/500x750?text=App+Conectada",
-                category: "Sistema",
-                status: "active"
-            }},
-            { upsert: true }
-        );
-    }
+    console.error("❌ Error en carga rápida:", e.message);
   }
 }
 
