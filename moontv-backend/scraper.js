@@ -9,14 +9,17 @@ async function runScraper() {
     const { data } = await axios.get('https://cuevana.bi/peliculas', {
       headers: { 
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
-      }
+      },
+      timeout: 10000
     });
+    
     const $ = cheerio.load(data);
     let count = 0;
 
-    // Selector actualizado: Cuevana suele usar .xxx o figuras dentro de listas
-    // Vamos a intentar con 'ul.movies-list li' o '.item' que es lo más común
-    $('.item, .ml-item, .movie').each(async (i, el) => {
+    // Buscamos los elementos de las películas
+    const items = $('.item, .ml-item, .movie');
+    
+    for (const el of items) {
       const title = $(el).find('h2, .title, .entry-title').text().trim();
       const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
       const sourceUrl = $(el).find('a').attr('href');
@@ -26,7 +29,7 @@ async function runScraper() {
           title: title,
           poster: poster,
           backdrop: poster,
-          description: "Sincronizado desde Cuevana",
+          description: "Sincronizado automáticamente desde Cuevana",
           genre: "Película",
           category: "Estrenos",
           year: 2026,
@@ -35,6 +38,18 @@ async function runScraper() {
           provider: "cuevana"
         };
 
+        await Movie.updateOne({ title: title }, { $set: movieData }, { upsert: true });
+        count++;
+      }
+    }
+
+    console.log(`✅ [Scraper] Proceso terminado. ${count} películas sincronizadas.`);
+  } catch (e) {
+    console.error("❌ [Scraper] Error:", e.message);
+  }
+}
+
+module.exports = runScraper;
         await Movie.updateOne({ title: title }, { $set: movieData }, { upsert: true });
         count++;
       }
