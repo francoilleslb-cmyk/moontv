@@ -4,79 +4,77 @@ const Movie = require('./models/Movie');
 const Event = require('./models/Event');
 
 async function runScraper() {
-  console.log("🚀 [Scraper] Iniciando actualización desde /peliculas...");
+  console.log("🚀 [Scraper] Iniciando escaneo de Películas y PelotaLibre...");
   
+  // --- SECCIÓN PELÍCULAS (CUEVANA) ---
   try {
     const { data } = await axios.get('https://cuevana.bi/peliculas', {
-      headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-      },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0' },
       timeout: 10000
     });
-    
     const $ = cheerio.load(data);
-    let count = 0;
+    let mCount = 0;
 
-    // Selector específico para el grid de películas
-    $('.item, .ml-item').each(async (i, el) => {
-      const title = $(el).find('h2').text().trim();
-      const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
-      let sourceUrl = $(el).find('a').attr('href');
-
-      if (title && sourceUrl) {
-        if (!sourceUrl.startsWith('http')) sourceUrl = `https://cuevana.bi${sourceUrl}`;
-        
+    // Buscamos cualquier enlace que lleve a una película
+    $('a[href*="/pelicula/"]').each(async (i, el) => {
+      const title = $(el).find('h2, .title').text().trim() || $(el).text().trim();
+      let link = $(el).attr('href');
+      
+      if (title && link && title.length > 2) {
+        const fullUrl = link.startsWith('http') ? link : `https://cuevana.bi${link}`;
         await Movie.updateOne(
           { title: title },
-          { $set: {
-              title: title,
-              poster: poster,
-              backdrop: poster,
-              category: "Estrenos",
-              sourceUrl: sourceUrl,
+          { $set: { 
+              title: title, 
+              sourceUrl: fullUrl, 
+              category: "Estrenos", 
               status: "active",
-              year: 2026,
-              description: "Sincronizado desde Cuevana."
+              poster: "https://via.placeholder.com/500x750?text=MoonTV" 
           }},
           { upsert: true }
         );
-        count++;
+        mCount++;
       }
     });
-
-    // Esperamos un poco para el log
-    setTimeout(() => console.log(`✅ [Scraper] Películas sincronizadas: ${count}`), 3000);
-    
-    await runDeportesScraper();
-
+    setTimeout(() => console.log(`🎬 [Scraper] Películas encontradas: ${mCount}`), 2000);
   } catch (e) {
-    console.error("❌ [Scraper] Error en películas:", e.message);
-    // Si falla películas, intentamos deportes de todos modos
-    await runDeportesScraper();
+    console.error("❌ Error en Cuevana:", e.message);
   }
-}
 
-async function runDeportesScraper() {
+  // --- SECCIÓN DEPORTES (PELOTA LIBRE) ---
   try {
-    const { data } = await axios.get('https://www.pirlotvonline.org/', { timeout: 10000 });
-    const $ = cheerio.load(data);
-    let dCount = 0;
-    
-    $('a').each(async (i, el) => {
-      const title = $(el).text().trim();
-      const link = $(el).attr('href');
-      if (title.toLowerCase().includes('vs')) {
+    const { data: pData } = await axios.get('https://pelotalibretv.su/', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000
+    });
+    const $p = cheerio.load(pData);
+    let pCount = 0;
+
+    // PelotaLibre suele usar tablas o listas de enlaces para los partidos
+    $p('a').each(async (i, el) => {
+      const title = $p(el).text().trim();
+      const link = $p(el).attr('href');
+
+      // Filtramos enlaces que parezcan partidos (suelen tener "vs" o nombres de equipos)
+      if (link && (title.toLowerCase().includes('vs') || link.includes('-en-vivo'))) {
+        const fullLink = link.startsWith('http') ? link : `https://pelotalibretv.su${link}`;
         await Event.updateOne(
           { title: title },
-          { $set: { title: title, sourceUrl: link, category: "Deportes", status: "active", type: "live" }},
+          { $set: { 
+              title: title, 
+              sourceUrl: fullLink, 
+              category: "Deportes", 
+              status: "active",
+              type: "live" 
+          }},
           { upsert: true }
         );
-        dCount++;
+        pCount++;
       }
     });
-    console.log(`⚽ [Scraper] Deportes actualizados: ${dCount}`);
+    console.log(`⚽ [Scraper] PelotaLibre actualizado: ${pCount} eventos.`);
   } catch (e) {
-    console.log("❌ [Scraper] Error en deportes:", e.message);
+    console.error("❌ Error en PelotaLibre:", e.message);
   }
 }
 
