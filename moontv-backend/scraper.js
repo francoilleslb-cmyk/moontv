@@ -2,25 +2,26 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const Movie = require('./models/Movie');
 
+// Función para pausar el código (milisegundos)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function runScraper() {
-  console.log("🚀 [Scraper] Iniciando escaneo profundo con sinopsis...");
+  console.log("🚀 [Scraper] Iniciando escaneo con pausas anti-bloqueo...");
   
   try {
     const { data } = await axios.get('https://cuevana.bi/peliculas', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0' },
-      timeout: 15000
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' }
     });
     
     const $ = cheerio.load(data);
     const movieLinks = [];
 
-    // 1. Primero recolectamos los links y datos básicos
     $('a[href*="/pelicula/"]').each((i, el) => {
       const link = $(el).attr('href');
-      const rawTitle = $(el).text().trim() || $(el).attr('title') || $(el).find('h2').text().trim();
-      let poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
+      const rawTitle = $(el).find('h2, .title').text().trim() || $(el).attr('title');
+      const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
 
-      if (link && rawTitle && rawTitle.length > 2) {
+      if (link && rawTitle) {
         movieLinks.push({
           url: link.startsWith('http') ? link : `https://cuevana.bi${link}`,
           rawTitle,
@@ -29,18 +30,23 @@ async function runScraper() {
       }
     });
 
-    // 2. Visitamos cada película para sacar la sinopsis (limitamos a 15 para no saturar)
-    for (const item of movieLinks.slice(0, 18)) {
+    // Procesamos solo 15 para probar, con PAUSAS
+    for (const item of movieLinks.slice(0, 15)) {
       try {
-        const { data: detailData } = await axios.get(item.url, { timeout: 8000 });
+        console.log(`🔍 Extrayendo: ${item.rawTitle}...`);
+        
+        // Esperamos 2 segundos antes de cada petición para no ser bloqueados
+        await delay(2000); 
+
+        const { data: detailData } = await axios.get(item.url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }
+        });
+        
         const $$ = cheerio.load(detailData);
+        const description = $$('.description, .sinopsis, p').first().text().trim() || "Ver detalles en la web.";
         
-        // Buscamos la sinopsis (Cuevana suele usar clases como .description o .sinopsis)
-        const description = $$('.description, .sinopsis, #sinopsis').text().trim() || "Sin descripción disponible.";
-        
-        // Limpieza de Título y Año (Regex)
         let finalTitle = item.rawTitle;
-        let finalYear = 2024;
+        let finalYear = 2026;
         const yearMatch = item.rawTitle.match(/\b(19|20)\d{2}\b/);
         if (yearMatch) {
           finalYear = parseInt(yearMatch[0]);
@@ -53,7 +59,7 @@ async function runScraper() {
               title: finalTitle, 
               sourceUrl: item.url, 
               poster: item.poster,
-              description: description, // <--- AQUÍ LA SINOPSIS
+              description: description,
               category: "Películas",
               status: "active",
               year: finalYear 
@@ -61,11 +67,16 @@ async function runScraper() {
           { upsert: true }
         );
       } catch (err) {
-        console.log(`⚠️ No se pudo obtener detalle de: ${item.rawTitle}`);
+        console.log(`⚠️ Bloqueado en: ${item.rawTitle}. Reintentando con datos básicos...`);
+        // Si falla la sinopsis, al menos guardamos lo básico para que no esté vacío
+        await Movie.updateOne(
+          { sourceUrl: item.url },
+          { $set: { title: item.rawTitle, sourceUrl: item.url, poster: item.poster, status: "active" }},
+          { upsert: true }
+        );
       }
     }
-
-    console.log(`✅ [Scraper] Proceso completado con sinopsis.`);
+    console.log(`✅ [Scraper] Terminado.`);
   } catch (e) {
     console.error("❌ Error General:", e.message);
   }
