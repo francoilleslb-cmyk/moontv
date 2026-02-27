@@ -3,6 +3,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const { exec } = require('child_process'); // Para ejecutar yt-dlp
+const runScraper = require('./scraper');    // Para cargar el scraper que creaste
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,9 +21,16 @@ app.get('/admin', (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ── Conectar MongoDB ─────────────────────────────────────────────────────────
+// Cambia lo que tienes por esto:
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅  MongoDB conectado'))
-  .catch(err => { console.error('❌  MongoDB:', err.message); process.exit(1); });
+  .then(() => {
+    console.log('✅  MongoDB conectado');
+    runScraper(); // <─── ESTO SE AGREGA: Ejecuta el scraper al iniciar
+  })
+  .catch(err => { 
+    console.error('❌  MongoDB:', err.message); 
+    process.exit(1); 
+  });
 
 // ── Rutas API ────────────────────────────────────────────────────────────────
 app.use('/api/auth', require('./routes/auth'));
@@ -45,7 +55,20 @@ app.get('/api', (req, res) => res.json({
     admin: '/admin',
   }
 }));
+// ── Resolver de Video (Extrae el link real) ──────────────────────────────────
+app.get('/api/resolve', (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ success: false, message: 'URL requerida' });
 
+  // Ejecutamos el binario yt-dlp que descargamos en Render
+  exec(`./yt-dlp -g "${url}"`, (error, stdout, stderr) => {
+    if (error) {
+      console.error('Error en yt-dlp:', error.message);
+      return res.status(500).json({ success: false, message: 'No se pudo extraer el video' });
+    }
+    res.json({ success: true, stream_url: stdout.trim() });
+  });
+});
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) =>
   res.status(404).json({ success: false, message: 'Ruta no encontrada' }));
