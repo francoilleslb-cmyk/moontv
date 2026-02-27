@@ -2,39 +2,67 @@ const express = require('express');
 const router = express.Router();
 const Movie = require('../models/Movie');
 const { adminAuth } = require('../middleware/auth');
-const { exec } = require('child_process'); // Necesario para ejecutar yt-dlp
+const { exec } = require('child_process');
+const axios = require('axios');
+const cheerio = require('cheerio');
 
-// 🎥 RUTA DE REPRODUCCIÓN (Extractor de Video)
-// Esta ruta debe ser pública o tener un middleware diferente si la App no envía token de admin
+// 🎥 RUTA DE REPRODUCCIÓN
 router.get('/:id/play', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
-    if (!movie || !movie.sourceUrl) {
+
+    if (!movie || !movie.streamUrl) {
       return res.status(404).json({ success: false, message: 'URL no disponible' });
     }
 
-    console.log(`Extracting video from: ${movie.sourceUrl}`);
+    console.log(`🎬 Extrayendo video de: ${movie.streamUrl}`);
 
-    // Ejecutamos yt-dlp (el binario que descargamos en el build)
-    // -g: devuelve solo la URL del video
-    // --no-warnings: limpia la salida
-    exec(`./yt-dlp -g --no-warnings "${movie.sourceUrl}"`, (error, stdout, stderr) => {
-      if (error) {
-        console.error('❌ Error extractor:', stderr);
+    // Intento 1: yt-dlp
+    exec(`./yt-dlp -g --no-warnings "${movie.streamUrl}"`, async (error, stdout, stderr) => {
+      if (!error && stdout.trim()) {
+        console.log(`✅ yt-dlp extrajo: ${stdout.trim().substring(0, 80)}...`);
+        return res.json({ 
+          success: true, 
+          url: stdout.trim(),
+          title: movie.title 
+        });
+      }
+
+      // Intento 2: cheerio como fallback
+      console.warn('⚠️ yt-dlp falló, intentando con cheerio...');
+      try {
+        const { data } = await axios.get(movie.streamUrl, {
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
+          },
+          timeout: 10000
+        });
+        const $ = cheerio.load(data);
+
+        let videoUrl = $('iframe[src*="player"], iframe[src*="embed"], iframe[src*="video"]').attr('src')
+                    || $('iframe').first().attr('src')
+                    || $('video source').attr('src')
+                    || $('video').attr('src')
+                    || '';
+
+        if (videoUrl.startsWith('//')) videoUrl = `https:${videoUrl}`;
+
+        if (videoUrl) {
+          console.log(`✅ Cheerio extrajo: ${videoUrl.substring(0, 80)}...`);
+          return res.json({ success: true, url: videoUrl, title: movie.title });
+        }
+
         return res.status(500).json({ 
           success: false, 
           message: 'No se pudo extraer el link de video',
           error: stderr 
         });
-      }
 
-      const videoUrl = stdout.trim();
-      res.json({ 
-        success: true, 
-        url: videoUrl,
-        title: movie.title 
-      });
+      } catch (e) {
+        return res.status(500).json({ success: false, message: e.message });
+      }
     });
+
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
