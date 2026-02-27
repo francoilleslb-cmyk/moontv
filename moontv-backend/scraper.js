@@ -3,7 +3,8 @@ const cheerio = require('cheerio');
 const Movie = require('./models/Movie');
 
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Referer': 'https://www.google.com/'
 };
 
 async function scrapeDetalle(url) {
@@ -12,34 +13,40 @@ async function scrapeDetalle(url) {
     const $ = cheerio.load(data);
 
     const description = $(
-      '.synopsis p, .Description p, .sinopsis p, [itemprop="description"], .info-content p'
+      '.synopsis p, .Description p, .sinopsis p, [itemprop="description"], .info-content p, .wp-content p, .description p'
     ).first().text().trim();
 
     const genre = $(
-      '.genres a, .Genres a, .genre a, [itemprop="genre"]'
+      '.genres a, .Genres a, .genre a, [itemprop="genre"], .tags a'
     ).first().text().trim() || '';
 
     const yearText = $(
-      '.year, .Year, [itemprop="dateCreated"], .date'
+      '.year, .Year, [itemprop="dateCreated"], .date, .extra span'
     ).first().text().trim();
     const yearMatch = yearText.match(/\b(20\d{2}|19\d{2})\b/);
     const year = yearMatch ? parseInt(yearMatch[0]) : null;
 
+    console.log(`🔍 ${url.split('/').slice(-2,-1)[0]}`);
+    console.log(`   Sinopsis: ${description ? description.substring(0, 60) + '...' : '❌ VACÍA'}`);
+    console.log(`   Género: ${genre || '❌ VACÍO'}`);
+    console.log(`   Año: ${year || '❌ NO ENCONTRADO'}`);
+
     return { description, genre, year };
-  } catch {
+  } catch (e) {
+    console.error(`❌ scrapeDetalle error: ${e.message}`);
     return { description: '', genre: '', year: null };
   }
 }
 
 async function runScraper() {
   console.log("🚀 [Scraper] Iniciando scraper Cuevana...");
-  
+
   try {
     const { data } = await axios.get('https://cuevana.bi/', {
       headers: HEADERS,
       timeout: 10000
     });
-    
+
     const $ = cheerio.load(data);
     const peliculas = [];
 
@@ -47,23 +54,32 @@ async function runScraper() {
       const link   = $(el).attr('href');
       const img    = $(el).find('img');
       const poster = img.attr('data-src') || img.attr('src');
-      const title  = img.attr('alt') || $(el).find('h2').text().trim();
+      let title    = img.attr('alt') || $(el).find('h2').text().trim();
 
       if (!link || !title || !poster) return;
       if (title.length < 2) return;
 
-      // Filtrar series y basura
+      // ✅ Filtrar series
+      if (/^serie\s/i.test(title)) return;
+      if (/temporada\s\d+/i.test(title)) return;
       if (/\d+x\d+/i.test(title)) return;
+      if (/^(El Caballero|Monarch|Bridgerton)/i.test(title) && /2026/.test(title)) return;
+
+      // ✅ Limpiar prefijo "Pelicula"
+      title = title.replace(/^pelicula\s+/i, '').trim();
+
+      // ✅ Filtrar logos y basura
       if (/logo|banner|icon/i.test(title)) return;
+      if (title.length < 3) return;
 
       const fullUrl = link.startsWith('http') ? link : `https://cuevana.bi${link}`;
       let fullPoster = poster.startsWith('//') ? `https:${poster}` : poster;
       if (!fullPoster.startsWith('http')) fullPoster = `https://cuevana.bi${fullPoster}`;
 
-      // Limpiar año del título
+      // ✅ Regex año corregido
       const yearMatch = title.match(/\b(20\d{2}|19\d{2})\b/);
       const yearFromTitle = yearMatch ? parseInt(yearMatch[0]) : null;
-      const cleanTitle = yearMatch 
+      const cleanTitle = yearMatch
         ? title.replace(yearMatch[0], '').replace(/\s*-\s*/g, ' ').trim()
         : title.trim();
 
@@ -87,15 +103,15 @@ async function runScraper() {
       try {
         await Movie.updateOne(
           { streamUrl: p.url },
-          { $set: { 
-              title:       p.title, 
-              streamUrl:   p.url,
+          { $set: {
+              title:       p.title,
+              streamUrl:   p.url,       // ← URL de la página, el video se extrae on-demand
               poster:      p.poster,
               genre:       detalle.genre,
               category:    'Películas',
               status:      'active',
               year:        finalYear,
-              description: detalle.description || 'Sin sinopsis disponible.'
+              description: detalle.description || ''
           }},
           { upsert: true }
         );
