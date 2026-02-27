@@ -1,39 +1,51 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const Movie = require('./models/Movie'); // Asegúrate de que la ruta a tu modelo sea correcta
+const Movie = require('./models/Movie');
+const Event = require('./models/Event');
 
 async function runScraper() {
-    console.log("🚀 [Scraper] Iniciando actualización desde Cuevana.bi...");
-    try {
-        const { data } = await axios.get('https://cuevana.bi/peliculas', {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        const $ = cheerio.load(data);
-        let count = 0;
+  console.log("🚀 [Scraper] Iniciando actualización desde Cuevana.bi...");
+  try {
+    const { data } = await axios.get('https://cuevana.bi/peliculas', {
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+      }
+    });
+    const $ = cheerio.load(data);
+    let count = 0;
 
-        $('.item').each(async (i, el) => {
-            const movieData = {
-                title: $(el).find('h2').text().trim(),
-                poster: $(el).find('img').attr('data-src') || $(el).find('img').attr('src'),
-                sourceUrl: $(el).find('a').attr('href'),
-                provider: 'cuevana',
-                type: 'movie',
-                category: '650000000000000000000001' // Pon aquí un ID de categoría válido de tu DB
-            };
+    // Selector actualizado: Cuevana suele usar .xxx o figuras dentro de listas
+    // Vamos a intentar con 'ul.movies-list li' o '.item' que es lo más común
+    $('.item, .ml-item, .movie').each(async (i, el) => {
+      const title = $(el).find('h2, .title, .entry-title').text().trim();
+      const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
+      const sourceUrl = $(el).find('a').attr('href');
 
-            if (movieData.title && movieData.sourceUrl) {
-                await Movie.updateOne(
-                    { title: movieData.title },
-                    { $set: movieData },
-                    { upsert: true }
-                );
-                count++;
-            }
-        });
-        console.log(`✅ [Scraper] Proceso terminado. ${count} películas sincronizadas.`);
-    } catch (e) {
-        console.error("❌ [Scraper] Error:", e.message);
-    }
+      if (title && sourceUrl) {
+        const movieData = {
+          title: title,
+          poster: poster,
+          backdrop: poster,
+          description: "Sincronizado desde Cuevana",
+          genre: "Película",
+          category: "Estrenos",
+          year: 2026,
+          sourceUrl: sourceUrl,
+          status: "active",
+          provider: "cuevana"
+        };
+
+        await Movie.updateOne({ title: title }, { $set: movieData }, { upsert: true });
+        count++;
+      }
+    });
+
+    console.log(`✅ [Scraper] Proceso terminado. ${count} películas intentadas.`);
+  } catch (e) {
+    console.error("❌ [Scraper] Error:", e.message);
+  }
 }
+
+module.exports = runScraper;}
 
 module.exports = runScraper;
