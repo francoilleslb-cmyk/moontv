@@ -10,14 +10,14 @@ async function runScraper() {
       headers: { 
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
       },
-      timeout: 10000
+      timeout: 15000
     });
     
     const $ = cheerio.load(data);
     let count = 0;
 
-    // Buscamos los elementos de las películas
-    const items = $('.item, .ml-item, .movie');
+    // Seleccionamos los elementos y los convertimos en un array para iterar
+    const items = $('.item, .ml-item, .movie').toArray();
     
     for (const el of items) {
       const title = $(el).find('h2, .title, .entry-title').text().trim();
@@ -38,29 +38,52 @@ async function runScraper() {
           provider: "cuevana"
         };
 
+        // Aquí usamos el await correctamente dentro de la función async runScraper
         await Movie.updateOne({ title: title }, { $set: movieData }, { upsert: true });
         count++;
       }
     }
 
     console.log(`✅ [Scraper] Proceso terminado. ${count} películas sincronizadas.`);
+    
+    // Llamamos a la parte de deportes
+    await runDeportesScraper();
+
   } catch (e) {
-    console.error("❌ [Scraper] Error:", e.message);
+    console.error("❌ [Scraper] Error en películas:", e.message);
   }
 }
 
-module.exports = runScraper;
-        await Movie.updateOne({ title: title }, { $set: movieData }, { upsert: true });
-        count++;
-      }
+async function runDeportesScraper() {
+  try {
+    const { data } = await axios.get('https://www.pirlotvonline.org/', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
     });
+    const $ = cheerio.load(data);
+    const links = $('a').toArray();
 
-    console.log(`✅ [Scraper] Proceso terminado. ${count} películas intentadas.`);
+    for (const el of links) {
+      const eventTitle = $(el).text().trim();
+      const eventLink = $(el).attr('href');
+
+      if (eventTitle.toLowerCase().includes('vs')) {
+        await Event.updateOne(
+          { title: eventTitle },
+          { $set: { 
+              title: eventTitle, 
+              sourceUrl: eventLink, 
+              category: "Deportes", 
+              status: "active",
+              type: "live" 
+          }},
+          { upsert: true }
+        );
+      }
+    }
+    console.log("⚽ [Scraper] Deportes actualizados.");
   } catch (e) {
-    console.error("❌ [Scraper] Error:", e.message);
+    console.log("❌ [Scraper] Error en deportes:", e.message);
   }
 }
-
-module.exports = runScraper;}
 
 module.exports = runScraper;
