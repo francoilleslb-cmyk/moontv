@@ -3,12 +3,13 @@ const cheerio = require('cheerio');
 const Movie = require('./models/Movie');
 
 async function runScraper() {
-  console.log("🚀 [Scraper] Iniciando escaneo de emergencia...");
+  console.log("🚀 [Scraper] Extrayendo estrenos de GNula...");
   
   try {
-    const { data } = await axios.get('https://cuevana.bi/', {
+    const { data } = await axios.get('https://www2.gnula.one/category/estreno/', {
       headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://www.google.com/'
       },
       timeout: 10000
     });
@@ -16,53 +17,47 @@ async function runScraper() {
     const $ = cheerio.load(data);
     let mCount = 0;
 
-    // Buscamos todos los links que tengan una imagen adentro
-    $('a').each(async (i, el) => {
+    // En GNula los estrenos suelen estar en contenedores <article> o divs con clase .resumido
+    $('article, .resumido, .post-column').each(async (i, el) => {
       try {
-        const link = $(el).attr('href');
-        const img = $(el).find('img');
-        const poster = img.attr('data-src') || img.attr('src');
-        const title = img.attr('alt') || $(el).find('h2').text().trim();
+        const link = $(el).find('a').attr('href');
+        const title = $(el).find('h2, .entry-title').text().trim();
+        const poster = $(el).find('img').attr('src'); // GNula suele cargar imágenes directo en src
 
-        // Validamos que tenga la información mínima
         if (link && title && poster) {
-          const fullUrl = link.startsWith('http') ? link : `https://cuevana.bi${link}`;
-          let fullPoster = poster.startsWith('//') ? `https:${poster}` : poster;
-          if (!fullPoster.startsWith('http')) fullPoster = `https://cuevana.bi${fullPoster}`;
-
-          // Limpieza de año básica
-          let finalTitle = title;
-          let finalYear = 2025;
+          // Limpieza de título: GNula a veces añade "Ver película..." o años
+          let finalTitle = title.replace(/Ver película/gi, '').replace(/Online/gi, '').trim();
+          
+          // Extraer año si existe
           const yearMatch = title.match(/\b(20)\d{2}\b/);
-          if (yearMatch) {
-            finalYear = parseInt(yearMatch[0]);
-            finalTitle = title.replace(yearMatch[0], '').replace(/-/g, '').trim();
-          }
+          const finalYear = yearMatch ? parseInt(yearMatch[0]) : 2025;
+          if(yearMatch) finalTitle = finalTitle.replace(yearMatch[0], '').replace(/-/g, '').trim();
 
           await Movie.updateOne(
-            { sourceUrl: fullUrl },
+            { sourceUrl: link },
             { $set: { 
                 title: finalTitle, 
-                sourceUrl: fullUrl, 
-                poster: fullPoster,
-                category: "Películas",
+                sourceUrl: link, 
+                poster: poster,
+                category: "Estrenos",
                 status: "active",
                 year: finalYear,
-                description: "Actualizado automáticamente."
+                description: "Estreno sincronizado desde GNula."
             }},
             { upsert: true }
           );
           mCount++;
         }
-      } catch (err) {
-        // Ignorar errores individuales de una película
+      } catch (innerError) {
+        // Error en una película individual
       }
     });
 
-    // Usamos un log simple para evitar problemas de sincronía
-    console.log("✅ [Scraper] Escaneo finalizado.");
+    // Esperar un momento para que terminen las promesas de MongoDB
+    setTimeout(() => console.log(`🎬 [Scraper] ¡Éxito! GNula devolvió ${mCount} estrenos.`), 3000);
+
   } catch (e) {
-    console.error("❌ Error en el scraper:", e.message);
+    console.error("❌ Error en GNula:", e.message);
   }
 }
 
