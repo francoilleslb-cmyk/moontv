@@ -1,10 +1,44 @@
-// routes/movies.js
 const express = require('express');
 const router = express.Router();
 const Movie = require('../models/Movie');
 const { adminAuth } = require('../middleware/auth');
+const { exec } = require('child_process'); // Necesario para ejecutar yt-dlp
 
-router.use(adminAuth);
+// 🎥 RUTA DE REPRODUCCIÓN (Extractor de Video)
+// Esta ruta debe ser pública o tener un middleware diferente si la App no envía token de admin
+router.get('/:id/play', async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie || !movie.sourceUrl) {
+      return res.status(404).json({ success: false, message: 'URL no disponible' });
+    }
+
+    console.log(`Extracting video from: ${movie.sourceUrl}`);
+
+    // Ejecutamos yt-dlp (el binario que descargamos en el build)
+    // -g: devuelve solo la URL del video
+    // --no-warnings: limpia la salida
+    exec(`./yt-dlp -g --no-warnings "${movie.sourceUrl}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error('❌ Error extractor:', stderr);
+        return res.status(500).json({ 
+          success: false, 
+          message: 'No se pudo extraer el link de video',
+          error: stderr 
+        });
+      }
+
+      const videoUrl = stdout.trim();
+      res.json({ 
+        success: true, 
+        url: videoUrl,
+        title: movie.title 
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // 🔍 BÚSQUEDA
 router.get('/search', async (req, res) => {
@@ -18,34 +52,17 @@ router.get('/search', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 🗑️ BORRAR TODAS LAS PELÍCULAS (endpoint específico - va ANTES de /:id)
-router.delete('/delete-all', async (req, res) => {
+// 🗑️ BORRAR TODAS LAS PELÍCULAS
+router.delete('/delete-all', adminAuth, async (req, res) => {
   try {
     const { confirm, all } = req.query;
-    
-    // 🔐 Seguridad: requerir confirmación explícita
     if (confirm !== 'true') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Requiere ?confirm=true para ejecutar el borrado masivo' 
-      });
+      return res.status(400).json({ success: false, message: 'Requiere ?confirm=true' });
     }
-    
-    // Si all=true borra TODO, si no, solo las activas (más seguro)
     const filter = all === 'true' ? {} : { status: 'active' };
     const result = await Movie.deleteMany(filter);
-    
-    console.log(`🗑️ Eliminadas ${result.deletedCount} películas`);
-    
-    res.json({ 
-      success: true, 
-      message: `Se eliminaron ${result.deletedCount} películas`,
-      deletedCount: result.deletedCount 
-    });
-  } catch (err) {
-    console.error('❌ Error en DELETE /delete-all movies:', err);
-    res.status(500).json({ success: false, message: err.message });
-  }
+    res.json({ success: true, message: `Se eliminaron ${result.deletedCount} películas` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // 📋 LISTAR TODAS
@@ -63,7 +80,7 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 🔎 GET BY ID (va AL FINAL para no interferir con rutas específicas)
+// 🔎 GET BY ID
 router.get('/:id', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
@@ -73,7 +90,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ➕ CREAR
-router.post('/', async (req, res) => {
+router.post('/', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.create(req.body);
     res.status(201).json({ success: true, data: movie, message: 'Película creada' });
@@ -81,7 +98,7 @@ router.post('/', async (req, res) => {
 });
 
 // ✏️ ACTUALIZAR
-router.put('/:id', async (req, res) => {
+router.put('/:id', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
@@ -90,15 +107,15 @@ router.put('/:id', async (req, res) => {
 });
 
 // 🔄 CAMBIAR STATUS
-router.patch('/:id/status', async (req, res) => {
+router.patch('/:id/status', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
     res.json({ success: true, data: movie });
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
-// ❌ BORRAR UNA (va al final)
-router.delete('/:id', async (req, res) => {
+// ❌ BORRAR UNA
+router.delete('/:id', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndDelete(req.params.id);
     if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
