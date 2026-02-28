@@ -12,13 +12,11 @@ async function scrapeDetalle(url) {
     const { data } = await axios.get(url, { headers: HEADERS, timeout: 10000 });
     const $ = cheerio.load(data);
 
-    const description = $(
-      '.synopsis p, .Description p, .sinopsis p, [itemprop="description"], .info-content p, .wp-content p, .description p'
-    ).first().text().trim();
+const description = $('p').filter((i, el) => {
+  return $(el).text().trim().length > 50; // párrafos largos = sinopsis
+}).first().text().trim();
 
-    const genre = $(
-      '.genres a, .Genres a, .genre a, [itemprop="genre"], .tags a'
-    ).first().text().trim() || '';
+const genre = $('.jump-link[href*="genero"]').first().text().trim();
 
     const yearText = $(
       '.year, .Year, [itemprop="dateCreated"], .date, .extra span'
