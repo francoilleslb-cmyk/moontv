@@ -2,68 +2,91 @@ const express = require('express');
 const router = express.Router();
 const Movie = require('../models/Movie');
 const { adminAuth } = require('../middleware/auth');
-const { exec } = require('child_process');
-const axios = require('axios');
-const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
+
+async function extraerM3U8(url) {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote',
+      '--single-process' // Importante para Render free tier
+    ]
+  });
+
+  try {
+    const page = await browser.newPage();
+
+    // Bloquear recursos innecesarios para ahorrar memoria
+    await page.setRequestInterception(true);
+    let m3u8Url = null;
+
+    page.on('request', request => {
+      const reqUrl = request.url();
+      const resourceType = request.resourceType();
+
+      // Capturar m3u8
+      if (reqUrl.includes('.m3u8')) {
+        m3u8Url = reqUrl;
+        console.log(`🎯 m3u8 capturado: ${reqUrl}`);
+      }
+
+      // Bloquear imágenes, fonts y analytics para ahorrar RAM
+      if (['image', 'font', 'stylesheet'].includes(resourceType)) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Intentar click en play
+    await page.click('.jw-icon-playback, .play-button, [aria-label="Play"]').catch(() => {});
+
+    // Esperar hasta 10 segundos a que aparezca el m3u8
+    await new Promise(resolve => {
+      const interval = setInterval(() => {
+        if (m3u8Url) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 500);
+      setTimeout(() => { clearInterval(interval); resolve(); }, 10000);
+    });
+
+    await browser.close();
+    return m3u8Url;
+
+  } catch (e) {
+    await browser.close();
+    throw e;
+  }
+}
 
 // 🎥 RUTA DE REPRODUCCIÓN
 router.get('/:id/play', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
-
     if (!movie || !movie.streamUrl) {
       return res.status(404).json({ success: false, message: 'URL no disponible' });
     }
 
-    console.log(`🎬 Extrayendo video de: ${movie.streamUrl}`);
+    console.log(`🎬 Extrayendo m3u8 de: ${movie.streamUrl}`);
+    const m3u8Url = await extraerM3U8(movie.streamUrl);
 
-    // Intento 1: yt-dlp
-    exec(`./yt-dlp -g --no-warnings "${movie.streamUrl}"`, async (error, stdout, stderr) => {
-      if (!error && stdout.trim()) {
-        console.log(`✅ yt-dlp extrajo: ${stdout.trim().substring(0, 80)}...`);
-        return res.json({ 
-          success: true, 
-          url: stdout.trim(),
-          title: movie.title 
-        });
-      }
+    if (!m3u8Url) {
+      return res.status(500).json({ success: false, message: 'No se encontró el video' });
+    }
 
-      // Intento 2: cheerio como fallback
-      console.warn('⚠️ yt-dlp falló, intentando con cheerio...');
-      try {
-        const { data } = await axios.get(movie.streamUrl, {
-          headers: { 
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
-          },
-          timeout: 10000
-        });
-        const $ = cheerio.load(data);
-
-        let videoUrl = $('iframe[src*="player"], iframe[src*="embed"], iframe[src*="video"]').attr('src')
-                    || $('iframe').first().attr('src')
-                    || $('video source').attr('src')
-                    || $('video').attr('src')
-                    || '';
-
-        if (videoUrl.startsWith('//')) videoUrl = `https:${videoUrl}`;
-
-        if (videoUrl) {
-          console.log(`✅ Cheerio extrajo: ${videoUrl.substring(0, 80)}...`);
-          return res.json({ success: true, url: videoUrl, title: movie.title });
-        }
-
-        return res.status(500).json({ 
-          success: false, 
-          message: 'No se pudo extraer el link de video',
-          error: stderr 
-        });
-
-      } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
-      }
-    });
+    console.log(`✅ Devolviendo: ${m3u8Url}`);
+    res.json({ success: true, url: m3u8Url, title: movie.title });
 
   } catch (err) {
+    console.error('❌ Error en /play:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -80,7 +103,7 @@ router.get('/search', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 🗑️ BORRAR TODAS LAS PELÍCULAS
+// 🗑️ BORRAR TODAS
 router.delete('/delete-all', adminAuth, async (req, res) => {
   try {
     const { confirm, all } = req.query;
