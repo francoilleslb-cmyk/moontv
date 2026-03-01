@@ -55,7 +55,14 @@ async function extraerM3U8(url) {
     });
 
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
+✅ LOG temporal
+page.on('response', response => {
+  const reqUrl = response.url();
+  if (!reqUrl.includes('google') && !reqUrl.includes('analytics')) {
+    console.log(`📡 ${reqUrl.substring(0, 100)}`);
+  }
+});
+    
     // Esperar que cargue el iframe y el player
     await new Promise(r => setTimeout(r, 5000));
 
