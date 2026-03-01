@@ -13,28 +13,25 @@ async function extraerM3U8(url) {
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--no-zygote',
-      '--single-process' // Importante para Render free tier
+      '--single-process'
     ]
   });
 
   try {
     const page = await browser.newPage();
-
-    // Bloquear recursos innecesarios para ahorrar memoria
-    await page.setRequestInterception(true);
     let m3u8Url = null;
+
+    await page.setRequestInterception(true);
 
     page.on('request', request => {
       const reqUrl = request.url();
       const resourceType = request.resourceType();
 
-      // Capturar m3u8
       if (reqUrl.includes('.m3u8')) {
         m3u8Url = reqUrl;
         console.log(`🎯 m3u8 capturado: ${reqUrl}`);
       }
 
-      // Bloquear imágenes, fonts y analytics para ahorrar RAM
       if (['image', 'font', 'stylesheet'].includes(resourceType)) {
         request.abort();
       } else {
@@ -44,10 +41,28 @@ async function extraerM3U8(url) {
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Intentar click en play
-    await page.click('.jw-icon-playback, .play-button, [aria-label="Play"]').catch(() => {});
+    // Esperar que cargue el player
+    await new Promise(r => setTimeout(r, 3000));
 
-    // Esperar hasta 10 segundos a que aparezca el m3u8
+    // Intentar click en play en varios selectores posibles
+    const playSelectors = [
+      '.jw-icon-playback',
+      '.jw-icon-display',
+      'button[aria-label="Play"]',
+      '.play-button',
+      'video',
+      '.jw-display-icon-container'
+    ];
+
+    for (const selector of playSelectors) {
+      try {
+        await page.click(selector);
+        console.log(`✅ Click en ${selector}`);
+        break;
+      } catch {}
+    }
+
+    // Esperar hasta 15 segundos al m3u8
     await new Promise(resolve => {
       const interval = setInterval(() => {
         if (m3u8Url) {
@@ -55,7 +70,7 @@ async function extraerM3U8(url) {
           resolve();
         }
       }, 500);
-      setTimeout(() => { clearInterval(interval); resolve(); }, 10000);
+      setTimeout(() => { clearInterval(interval); resolve(); }, 15000);
     });
 
     await browser.close();
@@ -79,7 +94,7 @@ router.get('/:id/play', async (req, res) => {
     const m3u8Url = await extraerM3U8(movie.streamUrl);
 
     if (!m3u8Url) {
-      return res.status(500).json({ success: false, message: 'No se encontró el video' });
+      return res.status(500).json({ success: false, message: 'No se encontró ningún vídeo' });
     }
 
     console.log(`✅ Devolviendo: ${m3u8Url}`);
