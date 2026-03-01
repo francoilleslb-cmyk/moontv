@@ -21,8 +21,23 @@ async function extraerM3U8(url) {
     const page = await browser.newPage();
     let m3u8Url = null;
 
-    await page.setRequestInterception(true);
+    // ✅ Interceptar requests de TODAS las páginas incluyendo iframes
+    browser.on('targetcreated', async target => {
+      const newPage = await target.page();
+      if (!newPage) return;
 
+      await newPage.setRequestInterception(true).catch(() => {});
+      newPage.on('request', request => {
+        const reqUrl = request.url();
+        if (reqUrl.includes('.m3u8')) {
+          m3u8Url = reqUrl;
+          console.log(`🎯 m3u8 capturado en iframe: ${reqUrl}`);
+        }
+        request.continue().catch(() => {});
+      });
+    });
+
+    await page.setRequestInterception(true);
     page.on('request', request => {
       const reqUrl = request.url();
       const resourceType = request.resourceType();
@@ -39,19 +54,19 @@ async function extraerM3U8(url) {
       }
     });
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Esperar que cargue el player
-    await new Promise(r => setTimeout(r, 3000));
+    // Esperar que cargue el iframe y el player
+    await new Promise(r => setTimeout(r, 5000));
 
     // Intentar click en play en varios selectores posibles
     const playSelectors = [
       '.jw-icon-playback',
       '.jw-icon-display',
+      '.jw-display-icon-container',
       'button[aria-label="Play"]',
       '.play-button',
-      'video',
-      '.jw-display-icon-container'
+      'video'
     ];
 
     for (const selector of playSelectors) {
@@ -62,7 +77,7 @@ async function extraerM3U8(url) {
       } catch {}
     }
 
-    // Esperar hasta 15 segundos al m3u8
+    // Esperar hasta 20 segundos al m3u8
     await new Promise(resolve => {
       const interval = setInterval(() => {
         if (m3u8Url) {
@@ -70,7 +85,7 @@ async function extraerM3U8(url) {
           resolve();
         }
       }, 500);
-      setTimeout(() => { clearInterval(interval); resolve(); }, 15000);
+      setTimeout(() => { clearInterval(interval); resolve(); }, 20000);
     });
 
     await browser.close();
