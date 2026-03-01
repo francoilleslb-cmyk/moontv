@@ -11,16 +11,17 @@ function decodeStreamUrl(href) {
 }
 
 function parseDateTime(timeStr) {
-  // timeStr es algo como "17:30"
   const now = new Date();
   const [hours, minutes] = timeStr.split(':').map(Number);
   const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+  // Si la hora ya pasó, probablemente es del día siguiente
+  if (dt < now && hours < 6) {
+    dt.setDate(dt.getDate() + 1);
+  }
   return dt;
 }
 
 function parseCompetitionAndTeams(text) {
-  // Formato: "LaLiga: Real Betis vs Sevilla17:30"
-  // Separar competicion del partido
   const timeMatch = text.match(/(\d{2}:\d{2})$/);
   const time = timeMatch ? timeMatch[1] : '00:00';
   const withoutTime = text.replace(/\d{2}:\d{2}$/, '').trim();
@@ -42,8 +43,14 @@ function parseCompetitionAndTeams(text) {
 }
 
 function cleanChannelName(text) {
-  // "ESPN 2Calidad 720p" -> "ESPN 2"
   return text.replace(/Calidad\s+\d+p.*/i, '').trim();
+}
+
+function isValidStreamLink(href) {
+  if (!href) return false;
+  if (href.includes('#')) return false;
+  if (href.includes('agenda')) return false;
+  return true;
 }
 
 async function runEventosScraper() {
@@ -66,7 +73,10 @@ async function runEventosScraper() {
           const titleLink = li.querySelector('a[href*="#"]');
           const titleText = titleLink ? titleLink.textContent.trim() : '';
 
-          const channels = Array.from(li.querySelectorAll('a[href*="eventos"]')).map(a => ({
+          const channels = Array.from(li.querySelectorAll('a')).filter(a => {
+            const href = a.href || '';
+            return !href.includes('#') && !href.includes('agenda') && href.startsWith('http');
+          }).map(a => ({
             name: a.textContent.trim(),
             href: a.href
           }));
@@ -80,7 +90,7 @@ async function runEventosScraper() {
 
     console.log('Eventos encontrados: ' + eventos.length);
 
-    // Limpiar eventos del dia para reemplazar con datos frescos
+    // Limpiar eventos del dia
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -96,16 +106,14 @@ async function runEventosScraper() {
         name: cleanChannelName(ch.name),
         streamUrl: decodeStreamUrl(ch.href),
         logo: ''
-      })).filter(ch => ch.streamUrl && !ch.streamUrl.includes('#'));
-
-      if (channels.length === 0) continue;
+      }));
 
       const title = teamHome && teamAway ? teamHome + ' vs ' + teamAway : matchTitle;
 
       try {
         await Event.create({
           title,
-          competition: competition || 'Fútbol',
+          competition: competition || 'Futbol',
           sport: 'football',
           teamHome,
           teamAway,
