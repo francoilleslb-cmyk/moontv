@@ -21,32 +21,29 @@ async function extraerM3U8(url) {
     const page = await browser.newPage();
     let m3u8Url = null;
 
-    // ✅ Interceptar requests de TODAS las páginas incluyendo iframes
     browser.on('targetcreated', async target => {
       const newPage = await target.page();
       if (!newPage) return;
-
       await newPage.setRequestInterception(true).catch(() => {});
       newPage.on('request', request => {
         const reqUrl = request.url();
         if (reqUrl.includes('.m3u8')) {
           m3u8Url = reqUrl;
-          console.log(`🎯 m3u8 capturado en iframe: ${reqUrl}`);
+          console.log('M3U8 IFRAME:', reqUrl.substring(0, 100));
         }
         request.continue().catch(() => {});
       });
     });
 
     await page.setRequestInterception(true);
+
     page.on('request', request => {
       const reqUrl = request.url();
       const resourceType = request.resourceType();
-
       if (reqUrl.includes('.m3u8')) {
         m3u8Url = reqUrl;
-        console.log(`🎯 m3u8 capturado: ${reqUrl}`);
+        console.log('M3U8 MAIN:', reqUrl.substring(0, 100));
       }
-
       if (['image', 'font', 'stylesheet'].includes(resourceType)) {
         request.abort();
       } else {
@@ -54,12 +51,16 @@ async function extraerM3U8(url) {
       }
     });
 
+    page.on('response', async response => {
+      const reqUrl = response.url();
+      const status = response.status();
+      console.log('RESP ' + status + ': ' + reqUrl.substring(0, 80));
+    });
+
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Esperar que cargue el iframe y el player
     await new Promise(r => setTimeout(r, 5000));
 
-    // Intentar click en play en varios selectores posibles
     const playSelectors = [
       '.jw-icon-playback',
       '.jw-icon-display',
@@ -72,12 +73,11 @@ async function extraerM3U8(url) {
     for (const selector of playSelectors) {
       try {
         await page.click(selector);
-        console.log(`✅ Click en ${selector}`);
+        console.log('CLICK: ' + selector);
         break;
-      } catch {}
+      } catch (e) {}
     }
 
-    // Esperar hasta 20 segundos al m3u8
     await new Promise(resolve => {
       const interval = setInterval(() => {
         if (m3u8Url) {
@@ -97,7 +97,6 @@ async function extraerM3U8(url) {
   }
 }
 
-// 🎥 RUTA DE REPRODUCCIÓN
 router.get('/:id/play', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
@@ -105,23 +104,22 @@ router.get('/:id/play', async (req, res) => {
       return res.status(404).json({ success: false, message: 'URL no disponible' });
     }
 
-    console.log(`🎬 Extrayendo m3u8 de: ${movie.streamUrl}`);
+    console.log('Extrayendo m3u8 de: ' + movie.streamUrl);
     const m3u8Url = await extraerM3U8(movie.streamUrl);
 
     if (!m3u8Url) {
-      return res.status(500).json({ success: false, message: 'No se encontró ningún vídeo' });
+      return res.status(500).json({ success: false, message: 'No se encontro ningun video' });
     }
 
-    console.log(`✅ Devolviendo: ${m3u8Url}`);
+    console.log('Devolviendo: ' + m3u8Url);
     res.json({ success: true, url: m3u8Url, title: movie.title });
 
   } catch (err) {
-    console.error('❌ Error en /play:', err.message);
+    console.error('Error en /play:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// 🔍 BÚSQUEDA
 router.get('/search', async (req, res) => {
   try {
     const { q = '' } = req.query;
@@ -133,7 +131,6 @@ router.get('/search', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 🗑️ BORRAR TODAS
 router.delete('/delete-all', adminAuth, async (req, res) => {
   try {
     const { confirm, all } = req.query;
@@ -142,11 +139,10 @@ router.delete('/delete-all', adminAuth, async (req, res) => {
     }
     const filter = all === 'true' ? {} : { status: 'active' };
     const result = await Movie.deleteMany(filter);
-    res.json({ success: true, message: `Se eliminaron ${result.deletedCount} películas` });
+    res.json({ success: true, message: 'Se eliminaron ' + result.deletedCount + ' peliculas' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 📋 LISTAR TODAS
 router.get('/', async (req, res) => {
   try {
     const { page = 1, limit = 20, category, all } = req.query;
@@ -161,33 +157,29 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 🔎 GET BY ID
 router.get('/:id', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
-    if (!movie) return res.status(404).json({ success: false, message: 'Película no encontrada' });
+    if (!movie) return res.status(404).json({ success: false, message: 'Pelicula no encontrada' });
     res.json({ success: true, data: movie });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ➕ CREAR
 router.post('/', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.create(req.body);
-    res.status(201).json({ success: true, data: movie, message: 'Película creada' });
+    res.status(201).json({ success: true, data: movie, message: 'Pelicula creada' });
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
-// ✏️ ACTUALIZAR
 router.put('/:id', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
-    res.json({ success: true, data: movie, message: 'Película actualizada' });
+    res.json({ success: true, data: movie, message: 'Pelicula actualizada' });
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
-// 🔄 CAMBIAR STATUS
 router.patch('/:id/status', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
@@ -195,12 +187,11 @@ router.patch('/:id/status', adminAuth, async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
-// ❌ BORRAR UNA
 router.delete('/:id', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndDelete(req.params.id);
     if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
-    res.json({ success: true, message: `"${movie.title}" eliminada` });
+    res.json({ success: true, message: movie.title + ' eliminada' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
