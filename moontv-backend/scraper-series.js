@@ -74,7 +74,9 @@ async function runSeriesScraper() {
 
       // Limpiar titulo del episodio
       let epTitle = text.replace(/\d+x\d+/, '').trim();
-      epTitle = epTitle || (season + 'x' + episode);
+if (!epTitle || epTitle.toLowerCase().includes('poster')) {
+  epTitle = 'Episodio ' + episode;
+}
 
       const poster =
         img.attr('data-src') ||
