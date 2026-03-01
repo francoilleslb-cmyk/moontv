@@ -25,10 +25,11 @@ app.get('/admin', (req, res) =>
 // ── Conectar MongoDB ─────────────────────────────────────────────────────────
 // Cambia lo que tienes por esto:
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
+then(() => {
     console.log('✅  MongoDB conectado');
     runScraper();
-    runSeriesScraper();// <─── ESTO SE AGREGA: Ejecuta el scraper al iniciar
+    runSeriesScraper();
+    runEventosScraper();
   })
   .catch(err => { 
     console.error('❌  MongoDB:', err.message); 
