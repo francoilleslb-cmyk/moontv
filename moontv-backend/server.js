@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const { exec } = require('child_process'); // Para ejecutar yt-dlp
 const runScraper = require('./scraper');    // Para cargar el scraper que creaste
+const runSeriesScraper = require('./scraper-series');
 
 
 const app = express();
@@ -25,7 +26,8 @@ app.get('/admin', (req, res) =>
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('✅  MongoDB conectado');
-    runScraper(); // <─── ESTO SE AGREGA: Ejecuta el scraper al iniciar
+    runScraper();
+    runSeriesScraper();// <─── ESTO SE AGREGA: Ejecuta el scraper al iniciar
   })
   .catch(err => { 
     console.error('❌  MongoDB:', err.message); 
