@@ -7,19 +7,40 @@ const puppeteer = require('puppeteer');
 async function extraerM3U8(url) {
   const browser = await puppeteer.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-zygote',
-      '--single-process'
-    ]
+    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-zygote','--single-process']
   });
-
   try {
     const page = await browser.newPage();
+
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 3000));
+
+    // Obtener el data-server del primer li
+    const embedUrl = await page.evaluate(() => {
+      const li = document.querySelector('.tab-video-item li');
+      return li ? li.dataset.server : null;
+    });
+
+    console.log('Embed URL: ' + embedUrl);
+
+    if (!embedUrl) {
+      await browser.close();
+      return null;
+    }
+
+    // Navegar al embed y capturar m3u8
+    const page2 = await browser.newPage();
     let m3u8Url = null;
+
+    await page2.setRequestInterception(true);
+    page2.on('request', request => {
+      const reqUrl = request.url();
+      if (reqUrl.includes('.m3u8')) {
+        m3u8Url = reqUrl;
+        console.log('M3U8: ' + reqUrl);
+      }
+      request.continue();
+    });
 
     browser.on('targetcreated', async target => {
       const newPage = await target.page();
@@ -29,68 +50,28 @@ async function extraerM3U8(url) {
         const reqUrl = request.url();
         if (reqUrl.includes('.m3u8')) {
           m3u8Url = reqUrl;
-          console.log('M3U8 IFRAME:', reqUrl.substring(0, 100));
+          console.log('M3U8 iframe: ' + reqUrl);
         }
         request.continue().catch(() => {});
       });
     });
 
-    await page.setRequestInterception(true);
-
-    page.on('request', request => {
-      const reqUrl = request.url();
-      const resourceType = request.resourceType();
-      if (reqUrl.includes('.m3u8')) {
-        m3u8Url = reqUrl;
-        console.log('M3U8 MAIN:', reqUrl.substring(0, 100));
-      }
-      if (['image', 'font', 'stylesheet'].includes(resourceType)) {
-        request.abort();
-      } else {
-        request.continue();
-      }
-    });
-
-    page.on('response', async response => {
-      const reqUrl = response.url();
-      const status = response.status();
-      console.log('RESP ' + status + ': ' + reqUrl.substring(0, 80));
-    });
-
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
+    await page2.goto(embedUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await new Promise(r => setTimeout(r, 5000));
 
-    const playSelectors = [
-      '.jw-icon-playback',
-      '.jw-icon-display',
-      '.jw-display-icon-container',
-      'button[aria-label="Play"]',
-      '.play-button',
-      'video'
-    ];
-
-    for (const selector of playSelectors) {
-      try {
-        await page.click(selector);
-        console.log('CLICK: ' + selector);
-        break;
-      } catch (e) {}
+    // Intentar click en play
+    const selectors = ['.jw-icon-playback','.jw-icon-display','.jw-display-icon-container','video','button'];
+    for (const s of selectors) {
+      try { await page2.click(s); console.log('CLICK: ' + s); break; } catch(e) {}
     }
 
     await new Promise(resolve => {
-      const interval = setInterval(() => {
-        if (m3u8Url) {
-          clearInterval(interval);
-          resolve();
-        }
-      }, 500);
-      setTimeout(() => { clearInterval(interval); resolve(); }, 20000);
+      const iv = setInterval(() => { if (m3u8Url) { clearInterval(iv); resolve(); } }, 500);
+      setTimeout(() => { clearInterval(iv); resolve(); }, 15000);
     });
 
     await browser.close();
     return m3u8Url;
-
   } catch (e) {
     await browser.close();
     throw e;
@@ -100,22 +81,12 @@ async function extraerM3U8(url) {
 router.get('/:id/play', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
-    if (!movie || !movie.streamUrl) {
-      return res.status(404).json({ success: false, message: 'URL no disponible' });
-    }
-
-    console.log('Extrayendo m3u8 de: ' + movie.streamUrl);
+    if (!movie || !movie.streamUrl) return res.status(404).json({ success: false, message: 'URL no disponible' });
+    console.log('Extrayendo: ' + movie.streamUrl);
     const m3u8Url = await extraerM3U8(movie.streamUrl);
-
-    if (!m3u8Url) {
-      return res.status(500).json({ success: false, message: 'No se encontro ningun video' });
-    }
-
-    console.log('Devolviendo: ' + m3u8Url);
+    if (!m3u8Url) return res.status(500).json({ success: false, message: 'No se encontro video' });
     res.json({ success: true, url: m3u8Url, title: movie.title });
-
   } catch (err) {
-    console.error('Error en /play:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -123,10 +94,7 @@ router.get('/:id/play', async (req, res) => {
 router.get('/search', async (req, res) => {
   try {
     const { q = '' } = req.query;
-    const movies = await Movie.find({
-      status: 'active',
-      $or: [{ title: { $regex: q, $options: 'i' } }, { category: { $regex: q, $options: 'i' } }],
-    }).limit(30);
+    const movies = await Movie.find({ status: 'active', $or: [{ title: { $regex: q, $options: 'i' } }, { category: { $regex: q, $options: 'i' } }] }).limit(30);
     res.json({ success: true, data: movies });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -134,12 +102,9 @@ router.get('/search', async (req, res) => {
 router.delete('/delete-all', adminAuth, async (req, res) => {
   try {
     const { confirm, all } = req.query;
-    if (confirm !== 'true') {
-      return res.status(400).json({ success: false, message: 'Requiere ?confirm=true' });
-    }
-    const filter = all === 'true' ? {} : { status: 'active' };
-    const result = await Movie.deleteMany(filter);
-    res.json({ success: true, message: 'Se eliminaron ' + result.deletedCount + ' peliculas' });
+    if (confirm !== 'true') return res.status(400).json({ success: false, message: 'Requiere ?confirm=true' });
+    const result = await Movie.deleteMany(all === 'true' ? {} : { status: 'active' });
+    res.json({ success: true, message: 'Eliminadas: ' + result.deletedCount });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -149,10 +114,7 @@ router.get('/', async (req, res) => {
     const filter = all ? {} : { status: 'active' };
     if (category) filter.category = category;
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [movies, total] = await Promise.all([
-      Movie.find(filter).sort({ sortOrder: 1, createdAt: -1 }).skip(skip).limit(+limit),
-      Movie.countDocuments(filter),
-    ]);
+    const [movies, total] = await Promise.all([Movie.find(filter).sort({ sortOrder: 1, createdAt: -1 }).skip(skip).limit(+limit), Movie.countDocuments(filter)]);
     res.json({ success: true, data: movies, pagination: { page: +page, limit: +limit, total } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -160,7 +122,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
-    if (!movie) return res.status(404).json({ success: false, message: 'Pelicula no encontrada' });
+    if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
     res.json({ success: true, data: movie });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -168,7 +130,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.create(req.body);
-    res.status(201).json({ success: true, data: movie, message: 'Pelicula creada' });
+    res.status(201).json({ success: true, data: movie, message: 'Creada' });
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
@@ -176,7 +138,7 @@ router.put('/:id', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
-    res.json({ success: true, data: movie, message: 'Pelicula actualizada' });
+    res.json({ success: true, data: movie, message: 'Actualizada' });
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
@@ -191,7 +153,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
   try {
     const movie = await Movie.findByIdAndDelete(req.params.id);
     if (!movie) return res.status(404).json({ success: false, message: 'No encontrada' });
-    res.json({ success: true, message: movie.title + ' eliminada' });
+    res.json({ success: true, message: 'Eliminada' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
