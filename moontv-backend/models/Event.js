@@ -11,6 +11,7 @@ const EventSchema = new mongoose.Schema({
   logoHome:    { type: String, default: '' },
   logoAway:    { type: String, default: '' },
   datetime:    { type: Date, required: true },
+  eventUrl: { type: String, default: '' },
   channels: [{
     name:      { type: String, required: true },
     streamUrl: { type: String, required: true },
