@@ -27,7 +27,6 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('✅  MongoDB conectado');
 runTMDBScraper();
 runTMDBScraper.startCron();
-runSeriesScraper();
     runEventosScraper();
     runEventosScraper.startCron();
   })
