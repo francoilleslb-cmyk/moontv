@@ -5,7 +5,6 @@ const cors = require('cors');
 const path = require('path');
 const { exec } = require('child_process'); // Para ejecutar yt-dlp
 const runTMDBScraper = require('./scraper-tmdb');
-const runSeriesScraper = require('./scraper-series');
 const runEventosScraper = require('./scraper-eventos');
 
 const app = express();
