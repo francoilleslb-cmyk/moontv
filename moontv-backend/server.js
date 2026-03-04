@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const { exec } = require('child_process'); // Para ejecutar yt-dlp
 const runTMDBScraper = require('./scraper-tmdb');
+const runTMDBSeriesScraper = require('./scraper-tmdb-series');
 const runEventosScraper = require('./scraper-eventos');
 
 const app = express();
@@ -27,6 +28,8 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('✅  MongoDB conectado');
 runTMDBScraper();
 runTMDBScraper.startCron();
+  runTMDBSeriesScraper();
+runTMDBSeriesScraper.startCron();
     runEventosScraper();
     runEventosScraper.startCron();
   })
