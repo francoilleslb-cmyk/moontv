@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const { exec } = require('child_process'); // Para ejecutar yt-dlp
-const runScraper = require('./scraper');    // Para cargar el scraper que creaste
+const runTMDBScraper = require('./scraper-tmdb');
 const runSeriesScraper = require('./scraper-series');
 const runEventosScraper = require('./scraper-eventos');
 
@@ -26,8 +26,9 @@ app.get('/admin', (req, res) =>
 mongoose.connect(process.env.MONGODB_URI)
 .then(() => {
     console.log('✅  MongoDB conectado');
-    runScraper();
-    runSeriesScraper();
+runTMDBScraper();
+runTMDBScraper.startCron();
+runSeriesScraper();
     runEventosScraper();
     runEventosScraper.startCron();
   })
