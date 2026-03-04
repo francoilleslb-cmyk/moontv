@@ -13,8 +13,6 @@ const CHANNEL_MAP = {
   'ESPN 3': ['ESPN 3 HD'],
   'ESPN 4': ['ESPN 4HD'],
   'ESPN 5': ['ESPN 5HD'],
-  'ESPN 6': ['ESPN 6HD'],
-  'ESPN 7': ['ESPN 7HD'],
   'ESPN': ['ESPN HD', 'ESPN'],
   'TNT SPORTS': ['TNT Sports'],
   'TNT': ['TNT Sports'],
@@ -29,24 +27,15 @@ const CHANNEL_MAP = {
   'DEPORTV': ['DeporTV'],
 };
 
-// Ordenadas de más larga a más corta para evitar matches parciales
+// Solo fútbol — ordenadas de mayor a menor longitud
 const FOOTBALL_COMPETITIONS = [
   'La Liga Hypermotion', 'Champions League', 'Copa Libertadores', 'Copa Sudamericana',
-  'Liga Profesional', 'Premier League', 'Copa del Rey', 'Copa Italia', 'Copa de Portugal',
-  'Coupe de France', 'Supercopa de Italia', 'Supercopa de España', 'Nations League',
-  'La Liga', 'Liga MX', 'Serie A', 'Bundesliga', 'Ligue 1', 'FA Cup', 'FA CUP', 'MLS',
-  'Primera Division', 'Eredivisie', 'Eurocopa', 'Eliminatorias', 'Mundial',
-  'Liga BetPlay', 'Torneo Apertura', 'Torneo Clausura',
+  'Liga Profesional', 'Premier League', 'Coupe de France', 'Copa del Rey',
+  'Supercopa de Italia', 'Supercopa de Espana', 'Nations League', 'Copa Italia',
+  'Copa de Portugal', 'La Liga', 'Liga MX', 'Serie A', 'Bundesliga',
+  'Ligue 1', 'FA CUP', 'FA Cup', 'Eredivisie', 'Eurocopa',
+  'Eliminatorias', 'Mundial',
 ].sort((a, b) => b.length - a.length);
-
-// Equipos/ligas que NO son fútbol — descartar aunque haya match
-const NON_FOOTBALL = [
-  'Red Sox','Yankees','Dodgers','Mets','Cubs','Braves','Astros','Reds',
-  'Ducks','Penguins','Sabres','Islanders','Inslanders','Rangers','Bruins',
-  'Lakers','Celtics','Warriors','Bulls','Knicks','Thunder','Hawks','Bucks',
-  'Clippers','Spurs','Mavericks',
-  'Volleyball','Voleibol','Vóleibol','Hockey','Basketball','Básquetbol',
-];
 
 const MONTHS = {
   'enero':0,'febrero':1,'marzo':2,'abril':3,'mayo':4,'junio':5,
@@ -98,7 +87,7 @@ async function scrapePage() {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Detectar fechas
+  // Detectar fechas con sus posiciones en el texto original
   const datePattern = /(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+(\d+)\s+de\s+(\w+)\s+de\s+(\d{4})/gi;
   const datePositions = [];
   let dm;
@@ -108,87 +97,84 @@ async function scrapePage() {
 
   const channelPattern = /(ESPN\s*(?:PREMIUM|Premium|\d)?|TNT\s*Sports?|TyC\s*Sports?|Fox\s*Sports?\s*\d?|DSports?\s*\d?|Claro\s*Sports?|DeporTV)/gi;
 
-  // Regex principal — captura RAWTEAM1 TIME RAWTEAM2 antes del separador
-  const matchRe = /([\wáéíóúñüÁÉÍÓÚÑÜ][\wáéíóúñüÁÉÍÓÚÑÜ \.\-]{0,60}?)\s+(\d{1,2}:\d{2})\s+([\wáéíóúñüÁÉÍÓÚÑÜ][\wáéíóúñüÁÉÍÓÚÑÜ \.\-]{0,60}?)\s+(?:Formaciones y más datos|Más datos)/g;
+  // ENFOQUE: dividir texto en bloques por "Formaciones y más datos" / "Más datos"
+  // Cada bloque termina justo antes del separador y contiene exactamente 1 partido
+  const SEP_RE = /Formaciones y más datos|Más datos/g;
+  const sepPositions = [];
+  let sp;
+  while ((sp = SEP_RE.exec(text)) !== null) {
+    sepPositions.push({ start: sp.index, end: sp.index + sp[0].length });
+  }
 
   const eventos = [];
   const seen = new Set();
-  let m;
 
-  while ((m = matchRe.exec(text)) !== null) {
-    const rawHome = m[1].trim();
-    const time = m[2];
-    const rawAway = m[3].trim();
-    const pos = m.index;
+  for (let i = 0; i < sepPositions.length; i++) {
+    const sep = sepPositions[i];
 
-    // Buscar competición dentro del rawHome (viene incluida)
+    // El bloque de este partido va desde el separador anterior (o inicio) hasta este
+    const blockStart = i > 0 ? sepPositions[i-1].end : 0;
+    const blockEnd = sep.start;
+    const block = text.substring(blockStart, blockEnd).trim();
+
+    // Los canales están entre este separador y el siguiente
+    const channelStart = sep.end;
+    const channelEnd = i + 1 < sepPositions.length ? sepPositions[i+1].start : Math.min(sep.end + 300, text.length);
+    const channelZone = text.substring(channelStart, channelEnd);
+
+    // Buscar el tiempo (HH:MM) en el bloque
+    const timeMatch = block.match(/\b(\d{1,2}:\d{2})\b/);
+    if (!timeMatch) continue;
+    const time = timeMatch[1];
+    const timeIdx = block.indexOf(timeMatch[0]);
+
+    // Texto antes y después del tiempo
+    const beforeTime = block.substring(0, timeIdx).trim();
+    const afterTime = block.substring(timeIdx + time.length).trim();
+
+    if (!beforeTime || !afterTime) continue;
+
+    // Equipo local = últimas palabras antes del tiempo (después de cualquier competición)
+    // Equipo visitante = primeras palabras después del tiempo
+    const beforeWords = beforeTime.split(/\s+/);
+    const afterWords = afterTime.split(/\s+/).filter(w => w.length > 0);
+
+    // Buscar competición en beforeWords — la competición precede al equipo
     let competition = '';
-    let teamHome = rawHome;
-
-    const normHome = normalize(rawHome);
+    let compEndIdx = -1;
+    const normBefore = normalize(beforeTime);
     for (const comp of FOOTBALL_COMPETITIONS) {
-      const normComp = normalize(comp);
-      const idx = normHome.lastIndexOf(normComp);
+      const nc = normalize(comp);
+      const idx = normBefore.lastIndexOf(nc);
       if (idx !== -1) {
-        // Verificar que sea palabra completa (no MLB vs MLS)
-        const after = normHome[idx + normComp.length] || ' ';
-        if (/[a-z]/.test(after)) continue;
         competition = comp;
-        teamHome = rawHome.substring(idx + comp.length).trim();
+        compEndIdx = idx + comp.length;
         break;
       }
     }
 
-    // Si no encontró competición en rawHome, buscar en los 150 chars antes en el texto
-    if (!competition) {
-      const beforeText = text.substring(Math.max(0, pos - 150), pos);
-      const normBefore = normalize(beforeText);
-      for (const comp of FOOTBALL_COMPETITIONS) {
-        const nc = normalize(comp);
-        const idx = normBefore.lastIndexOf(nc);
-        if (idx !== -1) {
-          const after = normBefore[idx + nc.length] || ' ';
-          if (/[a-z]/.test(after)) continue;
-          competition = comp;
-          break;
-        }
-      }
-    }
-
-    // Solo fútbol — si no hay competición conocida, saltar
+    // Si no hay competición de fútbol, saltar
     if (!competition) continue;
 
-    // Limpiar teamHome de prefijos de canales/streaming
-    const cleanPrefixes = (s) => {
-      let r = s.trim();
-      let prev = '';
-      while (prev !== r) {
-        prev = r;
-        r = r.replace(/^(?:Premium|Disney[^a-z]*|Star[^a-z]*|DGO|datos|ESPN\s*\d?|DSports?\s*\d?|TNT[^a-z]*|TyC[^a-z]*|Fox[^a-z]*)\s+/gi, '').trim();
-      }
-      return r;
-    };
+    // Equipo local = palabras después de la competición
+    const afterComp = beforeTime.substring(compEndIdx).trim();
+    const homeWords = afterComp.split(/\s+/).filter(w => w.length > 0).slice(0, 5);
+    const teamHome = homeWords.join(' ');
 
-    const finalHome = cleanPrefixes(teamHome);
-    const finalAway = cleanPrefixes(rawAway.split(/\s+/).slice(0, 5).join(' '));
+    // Equipo visitante = primeras palabras después del tiempo (máx 5)
+    const teamAway = afterWords.slice(0, 5).join(' ');
 
-    // Verificar que no sea deporte no-fútbol
-    const isNonFootball = NON_FOOTBALL.some(nf => 
-      finalHome.includes(nf) || finalAway.includes(nf) || 
-      normalize(finalHome).includes(normalize(nf)) || normalize(finalAway).includes(normalize(nf))
-    );
-    if (isNonFootball) continue;
+    if (!teamHome || !teamAway || teamHome.length < 2 || teamAway.length < 2) continue;
+    if (teamHome === teamAway) continue;
 
-    if (!finalHome || !finalAway || finalHome.length < 2 || finalAway.length < 2) continue;
-    if (finalHome === finalAway) continue;
-
-    // Fecha más cercana
+    // Fecha más cercana antes de este bloque
+    const absPos = blockStart;
     let currentDate = '';
     for (const dp of datePositions) {
-      if (dp.index <= pos) currentDate = dp.dateStr;
+      if (dp.index <= absPos + blockEnd) currentDate = dp.dateStr;
     }
 
-    // Solo hoy y mañana
+    // Filtrar solo hoy y mañana
     const eventDate = parseDateTime(time, currentDate);
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -196,16 +182,14 @@ async function scrapePage() {
     dayAfterTomorrow.setDate(todayStart.getDate() + 2);
     if (eventDate < todayStart || eventDate >= dayAfterTomorrow) continue;
 
-    // Canales después del separador
-    const afterPos = pos + m[0].length;
-    const afterText = text.substring(afterPos, afterPos + 200);
-    const channelMatches = [...afterText.matchAll(channelPattern)].map(c => c[0].trim());
+    // Canales
+    const channelMatches = [...channelZone.matchAll(channelPattern)].map(c => c[0].trim());
     const uniqueChannels = [...new Set(channelMatches)];
 
-    const key = normalize(finalHome) + '|' + normalize(finalAway) + '|' + time;
+    const key = normalize(teamHome) + '|' + normalize(teamAway) + '|' + time;
     if (!seen.has(key)) {
       seen.add(key);
-      eventos.push({ competition, teamHome: finalHome, teamAway: finalAway, time, channelNames: uniqueChannels, dateStr: currentDate });
+      eventos.push({ competition, teamHome, teamAway, time, channelNames: uniqueChannels, dateStr: currentDate });
     }
   }
 
@@ -265,6 +249,29 @@ async function runEventosScraper() {
         eCount++;
         console.log('['+eCount+'] '+title+' ('+ev.time+') ['+status+'] -> '+(channels.map(c=>c.name).join(', ')||'sin canal'));
       } catch(err) { console.error('Error: '+err.message); }
+    }
+    console.log('[EventosScraper] Finalizado. '+eCount+' eventos guardados.');
+  } catch(e) {
+    console.error('Error en scraper: '+e.message);
+  }
+}
+
+function startCron() {
+  const now = new Date();
+  const next6am = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0);
+  if (next6am <= now) next6am.setDate(next6am.getDate() + 1);
+  console.log('[EventosScraper] Proxima actualizacion: ' + next6am.toLocaleString());
+  setTimeout(() => {
+    runEventosScraper();
+    setInterval(runEventosScraper, 24 * 60 * 60 * 1000);
+  }, next6am - now);
+  setInterval(updateLiveStatus, 5 * 60 * 1000);
+  console.log('[EventosScraper] Monitor en vivo activo (cada 5 min)');
+}
+
+module.exports = runEventosScraper;
+module.exports.startCron = startCron;
+'+err.message); }
     }
     console.log('[EventosScraper] Finalizado. '+eCount+' eventos guardados.');
   } catch(e) {
