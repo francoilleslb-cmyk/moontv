@@ -2415,6 +2415,7 @@ function renderMoviesTable(movies) {
       <td><span style="font-size:13px;color:var(--yellow)">${m.rating?'⭐ '+m.rating:'—'}</span></td>
       <td>${badge}</td>
       <td><div class="actions-cell">
+        <button class="icon-btn" style="background:rgba(0,230,118,.08);color:var(--green)" onclick="openMovieDetail('${m._id}')">▶</button>
         <button class="icon-btn icon-btn-edit" onclick="openEditMovie('${m._id}')">✏️</button>
         <button class="icon-btn icon-btn-toggle ${m.status!=='active'?'off':''}"
           onclick="toggleMovieStatus('${m._id}','${m.status}')">${m.status==='active'?'👁️':'🚫'}</button>
@@ -2511,6 +2512,54 @@ async function deleteMovie(id, title) {
     if (res.success) { showToast('success',`🗑️ ${res.message}`); loadMovies(); }
     else showToast('error',res.message);
   } catch(e) { showToast('error','Error eliminando'); }
+}
+
+// ── MOVIE DETAIL MODAL ───────────────────────────────────────────────────────
+async function openMovieDetail(id) {
+  try {
+    const r = await fetch(`${API}/api/movies/${id}`);
+    const { data: m } = await r.json();
+    const genres = (m.genres && m.genres.length) ? m.genres.join(', ') : (m.genre || '—');
+    const overlay = document.getElementById('movie-detail-overlay');
+    document.getElementById('md-backdrop').style.backgroundImage =
+      m.backdrop ? `url(${m.backdrop})` : (m.poster ? `url(${m.poster})` : 'none');
+    document.getElementById('md-poster').src = m.poster || '';
+    document.getElementById('md-poster').style.display = m.poster ? '' : 'none';
+    document.getElementById('md-title').textContent = m.title || '';
+    document.getElementById('md-meta').textContent =
+      [m.year, genres, m.duration, m.rating ? '⭐ ' + m.rating : ''].filter(Boolean).join(' · ');
+    document.getElementById('md-synopsis').textContent = m.synopsis || m.description || 'Sin sinopsis disponible.';
+    const playBtn = document.getElementById('md-play-btn');
+    if (m.streamUrl) {
+      playBtn.style.display = '';
+      playBtn.onclick = () => openMoviePlayer(m.streamUrl, m.embedType, m.title);
+    } else {
+      playBtn.style.display = 'none';
+    }
+    overlay.style.display = 'flex';
+  } catch(e) { showToast('error','Error cargando detalle'); }
+}
+
+function closeMovieDetail() {
+  document.getElementById('movie-detail-overlay').style.display = 'none';
+  document.getElementById('movie-player-overlay').style.display = 'none';
+}
+
+function openMoviePlayer(streamUrl, embedType, title) {
+  const overlay = document.getElementById('movie-player-overlay');
+  document.getElementById('mp-title').textContent = title || '';
+  const container = document.getElementById('mp-container');
+  if (embedType === 'vidsrc' || streamUrl.includes('vidsrc') || streamUrl.includes('embed')) {
+    container.innerHTML = `<iframe src="${streamUrl}" style="width:100%;height:100%;border:none" allowfullscreen allow="autoplay"></iframe>`;
+  } else {
+    container.innerHTML = `<video src="${streamUrl}" controls autoplay style="width:100%;height:100%;background:#000" controlsList="nodownload"></video>`;
+  }
+  overlay.style.display = 'flex';
+}
+
+function closeMoviePlayer() {
+  document.getElementById('movie-player-overlay').style.display = 'none';
+  document.getElementById('mp-container').innerHTML = '';
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2826,6 +2875,34 @@ document.getElementById('category-modal').addEventListener('click', function(e) 
 
 </script>
 
+<!-- ═══════════ MOVIE DETAIL OVERLAY ═══════════ -->
+<div id="movie-detail-overlay" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.85);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:780px;max-height:90vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);display:flex;flex-direction:column">
+    <div id="md-backdrop" style="height:220px;background-size:cover;background-position:center top;position:relative;flex-shrink:0">
+      <div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.1),var(--bg2))"></div>
+      <button onclick="closeMovieDetail()" style="position:absolute;top:14px;right:14px;background:rgba(0,0,0,.6);border:1px solid var(--border2);border-radius:8px;width:34px;height:34px;color:var(--text);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+    <div style="display:flex;gap:24px;padding:0 28px 28px;margin-top:-70px;position:relative;flex:1;overflow-y:auto">
+      <img id="md-poster" src="" alt="" style="width:110px;height:160px;object-fit:cover;border-radius:10px;border:2px solid var(--border2);flex-shrink:0;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+      <div style="flex:1;padding-top:80px">
+        <h2 id="md-title" style="font-size:22px;font-weight:800;margin-bottom:8px;line-height:1.2"></h2>
+        <p id="md-meta" style="font-size:13px;color:var(--text2);margin-bottom:16px;font-family:var(--mono)"></p>
+        <p id="md-synopsis" style="font-size:14px;color:var(--text2);line-height:1.7;margin-bottom:24px"></p>
+        <div style="display:flex;gap:10px">
+          <button id="md-play-btn" style="display:flex;align-items:center;gap:8px;padding:12px 28px;background:var(--accent);color:var(--bg);border:none;border-radius:10px;font-family:var(--font);font-size:15px;font-weight:800;cursor:pointer">▶ Reproducir</button>
+          <button onclick="closeMovieDetail()" style="padding:12px 20px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:10px;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="movie-player-overlay" style="display:none;position:fixed;inset:0;z-index:3000;background:#000;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 20px;background:rgba(0,0,0,.8);border-bottom:1px solid var(--border)">
+    <button onclick="closeMoviePlayer()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:7px;width:32px;height:32px;color:var(--text);cursor:pointer;font-size:16px">✕</button>
+    <span id="mp-title" style="font-weight:700;font-size:15px;color:var(--text)"></span>
+  </div>
+  <div id="mp-container" style="flex:1;background:#000"></div>
+</div>
 <!-- ═══════════ MOVIE MODAL ═══════════ -->
 <div class="modal-overlay" id="movie-modal">
   <div class="modal" style="max-width:560px">
