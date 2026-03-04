@@ -2608,6 +2608,7 @@ function renderSeriesTable(series) {
       <td><span style="font-size:13px;color:var(--yellow)">${s.rating?'⭐ '+s.rating:'—'}</span></td>
       <td>${badge}</td>
       <td><div class="actions-cell">
+        <button class="icon-btn" style="background:rgba(0,230,118,.08);color:var(--green)" onclick="openSeriesDetail('${s._id}')">▶</button>
         <button class="icon-btn icon-btn-edit" onclick="openEditSeries('${s._id}')">✏️</button>
         <button class="icon-btn icon-btn-toggle ${s.status!=='active'?'off':''}"
           onclick="toggleSeriesStatus('${s._id}','${s.status}')">${s.status==='active'?'👁️':'🚫'}</button>
@@ -2700,6 +2701,54 @@ async function deleteSeries(id, title) {
     if (res.success) { showToast('success',`🗑️ ${res.message}`); loadSeries(); }
     else showToast('error',res.message);
   } catch(e) { showToast('error','Error eliminando'); }
+}
+
+// ── SERIES DETAIL MODAL ──────────────────────────────────────────────────────
+async function openSeriesDetail(id) {
+  try {
+    const r = await fetch(`${API}/api/series/${id}`);
+    const { data: s } = await r.json();
+    const genres = (s.genres && s.genres.length) ? s.genres.join(', ') : (s.genre || '—');
+    const overlay = document.getElementById('series-detail-overlay');
+    document.getElementById('sd-backdrop').style.backgroundImage =
+      s.backdrop ? `url(${s.backdrop})` : (s.poster ? `url(${s.poster})` : 'none');
+    document.getElementById('sd-poster').src = s.poster || '';
+    document.getElementById('sd-poster').style.display = s.poster ? '' : 'none';
+    document.getElementById('sd-title').textContent = s.title || '';
+    const meta = [s.year, genres, s.seasons ? s.seasons+' temp.' : '', s.rating ? '⭐ '+s.rating : ''].filter(Boolean).join(' · ');
+    document.getElementById('sd-meta').textContent = meta;
+    document.getElementById('sd-synopsis').textContent = s.synopsis || s.description || 'Sin sinopsis disponible.';
+    const playBtn = document.getElementById('sd-play-btn');
+    if (s.streamUrl) {
+      playBtn.style.display = '';
+      playBtn.onclick = () => openSeriesPlayer(s.streamUrl, s.embedType, s.title);
+    } else {
+      playBtn.style.display = 'none';
+    }
+    overlay.style.display = 'flex';
+  } catch(e) { showToast('error','Error cargando detalle'); }
+}
+
+function closeSeriesDetail() {
+  document.getElementById('series-detail-overlay').style.display = 'none';
+  document.getElementById('series-player-overlay').style.display = 'none';
+}
+
+function openSeriesPlayer(streamUrl, embedType, title) {
+  const overlay = document.getElementById('series-player-overlay');
+  document.getElementById('sp-title').textContent = title || '';
+  const container = document.getElementById('sp-container');
+  if (embedType === 'vidsrc' || streamUrl.includes('vidsrc') || streamUrl.includes('embed')) {
+    container.innerHTML = `<iframe src="${streamUrl}" style="width:100%;height:100%;border:none" allowfullscreen allow="autoplay"></iframe>`;
+  } else {
+    container.innerHTML = `<video src="${streamUrl}" controls autoplay style="width:100%;height:100%;background:#000" controlsList="nodownload"></video>`;
+  }
+  overlay.style.display = 'flex';
+}
+
+function closeSeriesPlayer() {
+  document.getElementById('series-player-overlay').style.display = 'none';
+  document.getElementById('sp-container').innerHTML = '';
 }
 
 function toggleSelectAll(cb) {
@@ -2967,6 +3016,34 @@ document.getElementById('category-modal').addEventListener('click', function(e) 
   </div>
 </div>
 
+<!-- ═══════════ SERIES DETAIL OVERLAY ═══════════ -->
+<div id="series-detail-overlay" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.85);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:780px;max-height:90vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);display:flex;flex-direction:column">
+    <div id="sd-backdrop" style="height:220px;background-size:cover;background-position:center top;position:relative;flex-shrink:0">
+      <div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.1),var(--bg2))"></div>
+      <button onclick="closeSeriesDetail()" style="position:absolute;top:14px;right:14px;background:rgba(0,0,0,.6);border:1px solid var(--border2);border-radius:8px;width:34px;height:34px;color:var(--text);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+    <div style="display:flex;gap:24px;padding:0 28px 28px;margin-top:-70px;position:relative;flex:1;overflow-y:auto">
+      <img id="sd-poster" src="" alt="" style="width:110px;height:160px;object-fit:cover;border-radius:10px;border:2px solid var(--border2);flex-shrink:0;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+      <div style="flex:1;padding-top:80px">
+        <h2 id="sd-title" style="font-size:22px;font-weight:800;margin-bottom:8px;line-height:1.2"></h2>
+        <p id="sd-meta" style="font-size:13px;color:var(--text2);margin-bottom:16px;font-family:var(--mono)"></p>
+        <p id="sd-synopsis" style="font-size:14px;color:var(--text2);line-height:1.7;margin-bottom:24px"></p>
+        <div style="display:flex;gap:10px">
+          <button id="sd-play-btn" style="display:flex;align-items:center;gap:8px;padding:12px 28px;background:var(--accent);color:var(--bg);border:none;border-radius:10px;font-family:var(--font);font-size:15px;font-weight:800;cursor:pointer">▶ Reproducir</button>
+          <button onclick="closeSeriesDetail()" style="padding:12px 20px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);border-radius:10px;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="series-player-overlay" style="display:none;position:fixed;inset:0;z-index:3000;background:#000;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 20px;background:rgba(0,0,0,.8);border-bottom:1px solid var(--border)">
+    <button onclick="closeSeriesPlayer()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:7px;width:32px;height:32px;color:var(--text);cursor:pointer;font-size:16px">✕</button>
+    <span id="sp-title" style="font-weight:700;font-size:15px;color:var(--text)"></span>
+  </div>
+  <div id="sp-container" style="flex:1;background:#000"></div>
+</div>
 <!-- ═══════════ SERIES MODAL ═══════════ -->
 <div class="modal-overlay" id="series-modal">
   <div class="modal" style="max-width:560px">
