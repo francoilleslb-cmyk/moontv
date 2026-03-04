@@ -76,7 +76,7 @@ async function runTMDBScraper() {
       await new Promise(r => setTimeout(r, 150)); // rate limit
 
       const genres = (m.genre_ids || []).map(id => GENRE_MAP[id]).filter(Boolean);
-      const streamUrl = `https://vidsrc.to/embed/movie/${imdbId}`;
+      const streamUrl = `https://vidsrc.xyz/embed/movie/${imdbId}`;
 
       const movieData = {
         title: m.title,
