@@ -29,21 +29,22 @@ const CHANNEL_MAP = {
   'DEPORTV': ['DeporTV'],
 };
 
+// Solo competiciones de fútbol
+const FOOTBALL_COMPETITIONS = [
+  'La Liga Hypermotion', 'La Liga', 'Premier League', 'Liga Profesional',
+  'Champions League', 'Copa Libertadores', 'Copa Sudamericana', 'Liga MX',
+  'Serie A', 'Bundesliga', 'Ligue 1', 'Copa del Rey', 'FA Cup', 'MLS',
+  'Copa Italia', 'Copa de Portugal', 'Primera División', 'Coupe de France',
+  'Eredivisie', 'Liga Portuguesa', 'Super Liga', 'Copa América',
+  'Eliminatorias', 'Mundial', 'Eurocopa', 'Nations League',
+  'Supercopa de España', 'Supercopa de Italia', 'Community Shield',
+  'Liga BetPlay', 'Liga Chilena', 'Liga Argentina',
+];
+
 const MONTHS = {
   'enero':0,'febrero':1,'marzo':2,'abril':3,'mayo':4,'junio':5,
   'julio':6,'agosto':7,'septiembre':8,'octubre':9,'noviembre':10,'diciembre':11
 };
-
-const COMPETITIONS = [
-  'La Liga Hypermotion','La Liga','Premier League','Liga Profesional',
-  'Champions League','Copa Libertadores','Copa Sudamericana','Liga MX',
-  'Serie A','Bundesliga','Ligue 1','Copa del Rey','FA Cup','MLS',
-  'Copa Italia','Copa de Portugal','Primera División','NHL','NBA','UFC',
-  'Formula 1','Formula 2','Fórmula 1','Fórmula 2','Euroliga','ATP','WTA',
-  'Super Rugby','Súper Rugby','Liga Nacional','Basquet','Básquet',
-  'Voleibol','Rugby','Liga Italiana','Supercopa','6 Naciones','Six Nations',
-  'Beisbol','Béisbol','Hockey','Tenis','Longines'
-].sort((a,b) => b.length - a.length);
 
 function parseDateTime(timeStr, dateStr) {
   const [hours, minutes] = timeStr.split(':').map(Number);
@@ -86,7 +87,7 @@ async function scrapePage() {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Detectar fechas y posiciones
+  // Detectar fechas
   const datePattern = /(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+(\d+)\s+de\s+(\w+)\s+de\s+(\d{4})/gi;
   const datePositions = [];
   let dm;
@@ -96,30 +97,25 @@ async function scrapePage() {
 
   const channelPattern = /(ESPN\s*(?:PREMIUM|Premium|\d)?|TNT\s*Sports?|TyC\s*Sports?|Fox\s*Sports?\s*\d?|DSports?\s*\d?|Claro\s*Sports?|DeporTV)/gi;
 
-  // Dividir por "Formaciones y más datos" y "Más datos" — cada bloque termina en un partido
-  const SEP = /(?=Formaciones y más datos|Más datos)/g;
-  const rawBlocks = text.split(SEP);
+  // Dividir por separador de partido
+  const blocks = text.split(/(?=Formaciones y más datos|Más datos)/g);
 
   const eventos = [];
   const seen = new Set();
-
-  // Calcular offset acumulado para saber posición en texto original
   let offset = 0;
 
-  for (let i = 0; i < rawBlocks.length; i++) {
-    const block = rawBlocks[i];
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
 
-    // Buscar patrón EQUIPO1 HH:MM EQUIPO2 al final del bloque
-    // El bloque termina justo antes de "Formaciones"
-    const matchPattern = /([\wáéíóúñüÁÉÍÓÚÑÜ][\wáéíóúñüÁÉÍÓÚÑÜ\s\.\-]{0,35}?)\s+(\d{1,2}:\d{2})\s+([\wáéíóúñüÁÉÍÓÚÑÜ][\wáéíóúñüÁÉÍÓÚÑÜ\s\.\-]{0,35}?)\s*$/;
-    const m = block.match(matchPattern);
+    // El patrón exacto al final de cada bloque: EQUIPO HH:MM EQUIPO
+    const m = block.match(/([\wáéíóúñüÁÉÍÓÚÑÜ][\wáéíóúñüÁÉÍÓÚÑÜ\s\.\-]{0,40}?)\s+(\d{1,2}:\d{2})\s+([\wáéíóúñüÁÉÍÓÚÑÜ][\wáéíóúñüÁÉÍÓÚÑÜ\s\.\-]{0,40}?)\s*$/);
 
     if (!m) { offset += block.length; continue; }
 
     const time = m[2];
     const pos = offset + block.lastIndexOf(m[0]);
 
-    // Fecha más cercana antes de esta posición
+    // Fecha más cercana
     let currentDate = '';
     for (const dp of datePositions) {
       if (dp.index <= pos) currentDate = dp.dateStr;
@@ -133,28 +129,41 @@ async function scrapePage() {
     dayAfterTomorrow.setDate(todayStart.getDate() + 2);
     if (eventDate < todayStart || eventDate >= dayAfterTomorrow) { offset += block.length; continue; }
 
-    // Tomar máximo las últimas 4 palabras para el equipo local
-    const homeWords = m[1].trim().split(/\s+/).filter(w => w.length > 0);
-    const teamHome = homeWords.slice(-4).join(' ').trim();
-
-    // Tomar máximo las primeras 4 palabras para el equipo visitante
-    const awayWords = m[3].trim().split(/\s+/).filter(w => w.length > 0);
-    const teamAway = awayWords.slice(0, 4).join(' ').trim();
-
-    if (teamHome.length < 2 || teamAway.length < 2) { offset += block.length; continue; }
-    if (teamHome === teamAway) { offset += block.length; continue; }
-
-    // Competición: buscar en los 100 chars antes del equipo local
-    const matchStart = offset + block.lastIndexOf(m[0]);
-    const beforeComp = text.substring(Math.max(0, matchStart - 100), matchStart);
-    let currentComp = 'Fútbol';
-    for (const comp of COMPETITIONS) {
+    // Competición: buscar en los 120 chars antes
+    const beforeComp = text.substring(Math.max(0, pos - 120), pos);
+    let currentComp = '';
+    for (const comp of FOOTBALL_COMPETITIONS) {
       if (beforeComp.includes(comp)) { currentComp = comp; break; }
     }
 
-    // Canales: en el bloque siguiente (que empieza con "Formaciones..." o "Más datos...")
-    const nextBlock = rawBlocks[i + 1] || '';
-    const channelZone = nextBlock.substring(0, 150);
+    // Si no es fútbol, saltar
+    if (!currentComp) { offset += block.length; continue; }
+
+    // Limpiar nombre — tomar solo las últimas palabras reales
+    const cleanName = (raw, fromEnd) => {
+      // Quitar todo hasta el último separador conocido
+      let s = raw.trim();
+      // Quitar prefijos de canales/streaming repetidamente
+      let prev = '';
+      while (prev !== s) {
+        prev = s;
+        s = s.replace(/^(?:[a-záéíóúñü]{1,6}\s+){0,2}(?:datos|Premium|DSports?\s*\d?|ESPN\s*\d?|TNT|TyC|Fox|DGO|Star|Disney)\s+/gi, '').trim();
+        s = s.replace(/^\d{4}\s+/g, '').trim();
+        s = s.replace(/^(?:La Liga(?:\s+Hypermotion)?|Premier League|Liga Profesional|Champions League|Copa Libertadores|Copa Sudamericana|Liga MX|Serie A|Bundesliga|Ligue 1|Copa del Rey|FA Cup|Coupe de France|Copa Italia|Supercopa de Italia|Primera División)\s+/gi, '').trim();
+      }
+      const words = s.split(/\s+/).filter(w => w.length > 0);
+      return fromEnd ? words.slice(-5).join(' ') : words.slice(0, 5).join(' ');
+    };
+
+    const teamHome = cleanName(m[1], true);
+    const teamAway = cleanName(m[3], false);
+
+    if (!teamHome || !teamAway || teamHome.length < 2 || teamAway.length < 2) { offset += block.length; continue; }
+    if (teamHome === teamAway) { offset += block.length; continue; }
+
+    // Canales en el bloque siguiente
+    const nextBlock = blocks[i + 1] || '';
+    const channelZone = nextBlock.substring(0, 200);
     const channelMatches = [...channelZone.matchAll(channelPattern)].map(c => c[0].trim());
     const uniqueChannels = [...new Set(channelMatches)];
 
@@ -196,7 +205,7 @@ async function runEventosScraper() {
   console.log('[EventosScraper] Iniciando scraper ole.com.ar...');
   try {
     const eventos = await scrapePage();
-    console.log('Eventos encontrados: ' + eventos.length);
+    console.log('Eventos de futbol encontrados: ' + eventos.length);
     if (eventos.length === 0) { console.log('[EventosScraper] Sin eventos.'); return; }
 
     const today = new Date(); today.setHours(0,0,0,0);
@@ -234,7 +243,7 @@ function startCron() {
   const now = new Date();
   const next6am = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0);
   if (next6am <= now) next6am.setDate(next6am.getDate() + 1);
-  console.log('[EventosScraper] Proxima actualizacion: ' + next6am.toLocaleString('es-AR'));
+  console.log('[EventosScraper] Proxima actualizacion: ' + next6am.toLocaleString());
   setTimeout(() => {
     runEventosScraper();
     setInterval(runEventosScraper, 24 * 60 * 60 * 1000);
