@@ -6,8 +6,8 @@ const path = require('path');
 const { exec } = require('child_process'); // Para ejecutar yt-dlp
 const runScraper = require('./scraper');    // Para cargar el scraper que creaste
 const runSeriesScraper = require('./scraper-series');
-const runEventosScraper = require('./scraper-eventos');
-
+runEventosScraper();
+runEventosScraper.startCron();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
