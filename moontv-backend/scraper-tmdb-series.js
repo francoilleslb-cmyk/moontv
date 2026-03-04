@@ -73,7 +73,7 @@ async function runTMDBSeriesScraper() {
       await new Promise(r => setTimeout(r, 150));
 
       const genres = (s.genre_ids || []).map(id => GENRE_MAP[id]).filter(Boolean);
-      const streamUrl = `https://vidsrc.to/embed/tv/${imdbId}`;
+      const streamUrl = `https://vidsrc.xyz/embed/tv/${imdbId}`;
 
       const seriesData = {
         title: s.name,
