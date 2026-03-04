@@ -1,240 +1,223 @@
 const axios = require('axios');
-const cheerio = require('cheerio');
 const Event = require('./models/Event');
 const Channel = require('./models/Channel');
 
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Accept-Language': 'es-AR,es;q=0.9',
-  'Referer': 'https://www.google.com/'
 };
 
-// Mapeo de nombres de canales del scraper a nombres en la DB
 const CHANNEL_MAP = {
-  'ESPN': ['ESPN HD', 'ESPN', 'ESPN 1'],
+  'ESPN PREMIUM': ['ESPN Premium HD'],
   'ESPN 2': ['ESPN 2 HD', 'ESPN 2'],
   'ESPN 3': ['ESPN 3 HD'],
   'ESPN 4': ['ESPN 4HD'],
   'ESPN 5': ['ESPN 5HD'],
   'ESPN 6': ['ESPN 6HD'],
   'ESPN 7': ['ESPN 7HD'],
-  'ESPN Premium': ['ESPN Premium HD', 'FOX SPORT PREMIUM'],
-  'TNT Sports': ['TNT Sports'],
+  'ESPN': ['ESPN HD', 'ESPN'],
+  'TNT SPORTS': ['TNT Sports'],
   'TNT': ['TNT Sports'],
-  'TyC Sports': ['TyC Sport'],
-  'TyC': ['TyC Sport'],
-  'Fox Sports': ['FOX Sports', 'FOX Sports HD'],
-  'Fox Sports 2': ['FOX Sports 2'],
-  'Fox Sports 3': ['FOX Sports 3'],
-  'DSports': ['DSports', 'DSports 2'],
-  'Claro Sports': ['Claro Sports'],
-  'DeporTV': ['DeporTV'],
-  'Disney +': [],   // streaming, no canal de cable
-  'Disney + Premium': [],
-  'DGO': [],
-  'Star+': [],
-  'Paramount+': [],
+  'TYC SPORTS': ['TyC Sport'],
+  'TYC': ['TyC Sport'],
+  'FOX SPORTS 3': ['FOX Sports 3'],
+  'FOX SPORTS 2': ['FOX Sports 2'],
+  'FOX SPORTS': ['FOX Sports'],
+  'DSPORTS 2': ['DSports 2'],
+  'DSPORTS': ['DSports'],
+  'CLARO SPORTS': ['Claro Sports'],
+  'DEPORTV': ['DeporTV'],
 };
 
-function parseDateTime(timeStr, dateStr) {
-  try {
-    // dateStr ejemplo: "miércoles 4 de marzo de 2026"
-    const months = {
-      'enero': 0, 'febrero': 1, 'marzo': 2, 'abril': 3, 'mayo': 4, 'junio': 5,
-      'julio': 6, 'agosto': 7, 'septiembre': 8, 'octubre': 9, 'noviembre': 10, 'diciembre': 11
-    };
-    const dateParts = dateStr.toLowerCase().match(/(\d+)\s+de\s+(\w+)\s+de\s+(\d+)/);
-    const [hours, minutes] = timeStr.split(':').map(Number);
+// Palabras basura que aparecen en los nombres de equipos por error del parser
+const GARBAGE_WORDS = [
+  /^(PN|LB|HL|UP|FL|BA|GP|ET|DGO)\s+/gi,
+  /\s+(PN|LB|HL|UP|FL|BA|GP|ET|DGO)$/gi,
+  /Disney\s*\+\s*(?:Premium)?/gi,
+  /Star\s*\+/gi,
+  /Paramount\s*\+/gi,
+  /ESPN\s*\d*/gi,
+  /TNT\s*Sports?/gi,
+  /TyC\s*Sports?/gi,
+  /Fox\s*Sports?\s*\d*/gi,
+  /DSports?\s*\d*/gi,
+  /Claro\s*Sports?/gi,
+  /DeporTV/gi,
+  /Formaciones y más datos/gi,
+  /Más datos/gi,
+  /Finalizado/gi,
+  /En vivo/gi,
+  /&#x27;/g,
+];
 
-    if (dateParts) {
-      const day = parseInt(dateParts[1]);
-      const month = months[dateParts[2]] ?? new Date().getMonth();
-      const year = parseInt(dateParts[3]);
-      return new Date(year, month, day, hours, minutes, 0);
-    }
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
-  } catch (e) {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+function cleanTeamName(name) {
+  let clean = name;
+  for (const pattern of GARBAGE_WORDS) {
+    clean = clean.replace(pattern, ' ');
   }
+  // Quitar números sueltos y caracteres raros
+  clean = clean.replace(/\b\d+\b/g, ' ');
+  clean = clean.replace(/[^a-záéíóúñüA-ZÁÉÍÓÚÑÜ0-9\s\.\-\']/g, ' ');
+  clean = clean.replace(/\s+/g, ' ').trim();
+  return clean;
+}
+
+function parseDateTime(timeStr, dateStr) {
+  const months = {
+    'enero':0,'febrero':1,'marzo':2,'abril':3,'mayo':4,'junio':5,
+    'julio':6,'agosto':7,'septiembre':8,'octubre':9,'noviembre':10,'diciembre':11
+  };
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  const dateParts = dateStr.toLowerCase().match(/(\d+)\s+de\s+(\w+)\s+de\s+(\d+)/);
+  if (dateParts) {
+    return new Date(parseInt(dateParts[3]), months[dateParts[2]] ?? 0, parseInt(dateParts[1]), hours, minutes, 0);
+  }
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
 }
 
 async function getChannelsFromDB(channelNames) {
   const results = [];
   for (const name of channelNames) {
-    const aliases = CHANNEL_MAP[name];
-    if (!aliases) continue;
-    if (aliases.length === 0) continue; // streaming, ignorar
-
-    for (const alias of aliases) {
-      const ch = await Channel.findOne({
-        name: { $regex: alias, $options: 'i' },
-        status: 'active'
-      });
-      if (ch) {
-        const url = ch.streamUrl || (ch.servers && ch.servers[0] && ch.servers[0].url) || '';
-        if (url && !results.find(r => r.name === ch.name)) {
-          results.push({ name: ch.name, streamUrl: url, logo: ch.logo || '' });
+    const key = Object.keys(CHANNEL_MAP).find(k => name.toUpperCase().includes(k));
+    if (!key) continue;
+    for (const alias of CHANNEL_MAP[key]) {
+      try {
+        const ch = await Channel.findOne({ name: { $regex: alias, $options: 'i' }, status: 'active' });
+        if (ch) {
+          const url = ch.streamUrl || (ch.servers && ch.servers[0] && ch.servers[0].url) || '';
+          if (url && !results.find(r => r.name === ch.name)) {
+            results.push({ name: ch.name, streamUrl: url, logo: ch.logo || '' });
+          }
+          break;
         }
-        break;
-      }
+      } catch(e) {}
     }
   }
   return results;
 }
 
+async function scrapePage() {
+  const { data } = await axios.get('https://www.ole.com.ar/agenda-deportiva', { headers: HEADERS, timeout: 15000 });
+  const text = data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+  const COMPETITIONS = [
+    'La Liga','Premier League','Liga Profesional','Champions League',
+    'Copa Libertadores','Copa Sudamericana','Liga MX','Serie A',
+    'Bundesliga','Ligue 1','Copa del Rey','FA Cup','MLS','Copa Italia',
+    'Copa de Portugal','Primera División','NHL','NBA','UFC',
+    'Fórmula 1','Fórmula 2','Euroliga','ATP','WTA','Súper Rugby',
+    'Liga Nacional','Rugby','Voleibol','Básquet'
+  ];
+
+  const timePattern = /\b(\d{1,2}:\d{2})\b/g;
+  const compPattern = new RegExp(COMPETITIONS.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  const channelPattern = /(ESPN\s*(?:PREMIUM|Premium|\d)?|TNT\s*Sports?|TyC\s*Sports?|Fox\s*Sports?\s*\d?|DSports?\s*\d?|Claro\s*Sports?|DeporTV)/gi;
+  const datePattern = /(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d+\s+de\s+\w+\s+de\s+\d{4}/gi;
+
+  // Fecha inicial
+  const firstDateMatch = text.match(/Agenda Deportiva del\s+([\w\s]+?\d{4})/i);
+  let currentDate = firstDateMatch ? firstDateMatch[1].trim() : '';
+  let currentComp = 'Fútbol';
+  const eventos = [];
+
+  let m;
+  while ((m = timePattern.exec(text)) !== null) {
+    const time = m[1];
+    const before = text.substring(Math.max(0, m.index - 300), m.index);
+    const after = text.substring(m.index + time.length, m.index + time.length + 350);
+
+    // Detectar nueva fecha
+    const newDates = [...before.matchAll(datePattern)];
+    if (newDates.length > 0) currentDate = newDates[newDates.length - 1][0];
+
+    // Detectar competición
+    const compsInBefore = [...before.matchAll(compPattern)];
+    if (compsInBefore.length > 0) currentComp = compsInBefore[compsInBefore.length - 1][0];
+
+    // Equipo local — texto limpio antes de la hora
+    const beforeClean = before
+      .replace(/Formaciones y más datos|Más datos|Finalizado|En vivo|ET/gi, ' ')
+      .replace(/\d+\s*[-–]\s*\d+/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const beforeParts = beforeClean.split(/\s{2,}/).filter(p => p.trim().length > 1);
+    const rawHome = beforeParts[beforeParts.length - 1] || '';
+    const teamHome = cleanTeamName(rawHome);
+
+    // Equipo visitante — texto limpio después de la hora
+    const afterClean = after
+      .replace(/Formaciones y más datos|Más datos|Finalizado|En vivo|ET/gi, ' ')
+      .replace(/\d+\s*[-–]\s*\d+/g, ' ');
+    const teamAwayMatch = afterClean.match(/^\s*([\wáéíóúñüÁÉÍÓÚÑÜ\s\.\-\']{3,50}?)(?=\s+(?:Formaciones|Más|ESPN|TNT|TyC|Fox|DSport|Disney|Claro|DGO|Star|Finalizado|En vivo|\d{1,2}:\d{2}))/i);
+    const rawAway = teamAwayMatch ? teamAwayMatch[1] : '';
+    const teamAway = cleanTeamName(rawAway);
+
+    if (!teamHome || !teamAway) continue;
+    if (teamHome.length < 3 || teamAway.length < 3) continue;
+    if (teamHome === teamAway) continue;
+    if (/^\d+$/.test(teamHome) || /^\d+$/.test(teamAway)) continue;
+
+    // Canales
+    const channelZone = after.substring(0, 280);
+    const channelMatches = [...channelZone.matchAll(channelPattern)].map(c => c[0].trim());
+    const uniqueChannels = [...new Set(channelMatches)];
+
+    // Evitar duplicados
+    const key = teamHome + '|' + teamAway + '|' + time;
+    if (!eventos.find(e => e.key === key)) {
+      eventos.push({ key, competition: currentComp, teamHome, teamAway, time, channelNames: uniqueChannels, dateStr: currentDate });
+    }
+  }
+
+  return eventos;
+}
+
 async function runEventosScraper() {
   console.log('[EventosScraper] Iniciando scraper ole.com.ar...');
-
   try {
-    const { data } = await axios.get('https://www.ole.com.ar/agenda-deportiva', {
-      headers: HEADERS,
-      timeout: 15000
-    });
+    const eventos = await scrapePage();
+    console.log('Eventos encontrados: ' + eventos.length);
 
-    const $ = cheerio.load(data);
+    if (eventos.length === 0) { console.log('[EventosScraper] Sin eventos.'); return; }
 
-    // Extraer texto limpio de la agenda
-    const text = $.text().replace(/\s+/g, ' ').trim();
-
-    // Encontrar la fecha actual
-    const dateMatch = text.match(/Agenda Deportiva del\s+([^]+?)\s+(?:La Liga|Premier|Copa|Liga|MLB|NFL|NBA|UFC)/i);
-    const dateStr = dateMatch ? dateMatch[1].trim() : '';
-    console.log('Fecha agenda: ' + dateStr);
-
-    // Parsear eventos desde los elementos del DOM
-    const eventos = [];
-
-    // Ole usa una estructura de cards - buscar por selectores comunes
-    const eventSelectors = [
-      '.event-card', '.agenda-event', '.match-card', 
-      '[class*="event"]', '[class*="match"]', '[class*="partido"]'
-    ];
-
-    let found = false;
-    for (const sel of eventSelectors) {
-      const els = $(sel);
-      if (els.length > 3) {
-        console.log('Selector encontrado: ' + sel + ' (' + els.length + ' elementos)');
-        found = true;
-
-        els.each((i, el) => {
-          const elText = $(el).text().replace(/\s+/g, ' ').trim();
-
-          // Buscar hora
-          const timeMatch = elText.match(/\b(\d{1,2}:\d{2})\b/);
-          if (!timeMatch) return;
-          const time = timeMatch[1];
-
-          // Buscar canales conocidos
-          const channelNames = [];
-          const channelPattern = /ESPN\s*\d*\s*(?:Premium)?|TNT\s*Sports?|TyC\s*Sports?|Fox\s*Sports?\s*\d*|DSports?\s*\d*|Claro\s*Sports?|DeporTV/gi;
-          const channelMatches = elText.match(channelPattern) || [];
-          channelMatches.forEach(c => channelNames.push(c.trim()));
-
-          // Extraer equipos - buscar patrón "Equipo1 HORA Equipo2"
-          const beforeTime = elText.substring(0, elText.indexOf(time)).trim();
-          const afterTime = elText.substring(elText.indexOf(time) + time.length).trim();
-
-          // Competición suele estar antes del primer equipo
-          const lines = beforeTime.split(/\s{2,}/).filter(l => l.trim().length > 0);
-          const competition = lines[0] || '';
-          const teamHome = lines[lines.length - 1] || '';
-          const teamAway = afterTime.split(/\s{2,}/)[0] || '';
-
-          if (teamHome && teamAway && teamHome !== teamAway) {
-            eventos.push({ competition, teamHome, teamAway, time, channelNames, dateStr });
-          }
-        });
-        break;
-      }
-    }
-
-    // Fallback: parsear el texto plano si no encontró selectores
-    if (!found || eventos.length === 0) {
-      console.log('Usando parser de texto plano...');
-
-      // Buscar competiciones conocidas y sus partidos
-      const competitionPattern = /(?:La Liga|Premier League|Liga Profesional|Champions League|Copa Libertadores|Copa Sudamericana|Liga MX|Serie A|Bundesliga|Ligue 1|Copa del Rey|FA Cup|MLB|NBA|NFL|UFC|MLS|Eredivisie|Liga BetPlay|Primera División)/gi;
-      const competitionMatches = [...text.matchAll(competitionPattern)];
-
-      for (let i = 0; i < competitionMatches.length; i++) {
-        const compStart = competitionMatches[i].index;
-        const compEnd = competitionMatches[i + 1] ? competitionMatches[i + 1].index : compStart + 500;
-        const block = text.substring(compStart, compEnd);
-        const competition = competitionMatches[i][0];
-
-        // Buscar partidos en el bloque: "Equipo1 HH:MM Equipo2"
-        const matchPattern = /([A-ZÁÉÍÓÚÑa-záéíóúñ\s\.]+?)\s+(\d{1,2}:\d{2})\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s\.]+?)(?=\s+(?:Formaciones|Más datos|ESPN|TNT|TyC|Fox|DSport|Disney|$))/g;
-        let matchResult;
-
-        while ((matchResult = matchPattern.exec(block)) !== null) {
-          const teamHome = matchResult[1].trim();
-          const time = matchResult[2];
-          const teamAway = matchResult[3].trim();
-
-          if (teamHome.length < 2 || teamAway.length < 2) continue;
-          if (teamHome === teamAway) continue;
-
-          // Buscar canales después del partido
-          const afterMatch = block.substring(matchResult.index + matchResult[0].length);
-          const channelNames = [];
-          const channelPattern = /ESPN\s*\d*\s*(?:Premium)?|TNT\s*Sports?|TyC\s*Sports?|Fox\s*Sports?\s*\d*|DSports?\s*\d*|Claro\s*Sports?|DeporTV/gi;
-          const channelMatches = afterMatch.substring(0, 200).match(channelPattern) || [];
-          channelMatches.forEach(c => channelNames.push(c.trim()));
-
-          eventos.push({ competition, teamHome, teamAway, time, channelNames, dateStr });
-        }
-      }
-    }
-
-    console.log('Eventos parseados: ' + eventos.length);
-
-    if (eventos.length === 0) {
-      console.log('[EventosScraper] No se encontraron eventos.');
-      return;
-    }
-
-    // Limpiar eventos del día
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    await Event.deleteMany({ datetime: { $gte: today, $lt: tomorrow } });
+    // Borrar eventos de hoy y mañana antes de recargar
+    const today = new Date(); today.setHours(0,0,0,0);
+    const dayAfterTomorrow = new Date(today); dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+    await Event.deleteMany({ datetime: { $gte: today, $lt: dayAfterTomorrow } });
 
     let eCount = 0;
     for (const ev of eventos) {
       const datetime = parseDateTime(ev.time, ev.dateStr);
       const channels = await getChannelsFromDB(ev.channelNames);
-
       const title = ev.teamHome + ' vs ' + ev.teamAway;
-
       try {
         await Event.create({
-          title,
-          competition: ev.competition || 'Fútbol',
-          sport: 'football',
-          teamHome: ev.teamHome,
-          teamAway: ev.teamAway,
-          datetime,
-          channels,
-          status: 'upcoming',
-          isActive: true
+          title, competition: ev.competition, sport: 'football',
+          teamHome: ev.teamHome, teamAway: ev.teamAway,
+          datetime, channels, status: 'upcoming', isActive: true
         });
         eCount++;
-        console.log('[' + eCount + '] ' + title + ' (' + ev.time + ') - ' + channels.length + ' canales: ' + ev.channelNames.join(', '));
-      } catch (err) {
-        console.error('Error guardando "' + title + '": ' + err.message);
-      }
+        console.log('['+eCount+'] '+title+' ('+ev.time+') -> '+(channels.map(c=>c.name).join(', ')||'sin canal'));
+      } catch(err) { console.error('Error: '+err.message); }
     }
-
-    console.log('[EventosScraper] Finalizado. ' + eCount + ' eventos guardados.');
-
-  } catch (e) {
-    console.error('Error en scraper de eventos: ' + e.message);
+    console.log('[EventosScraper] Finalizado. '+eCount+' eventos guardados.');
+  } catch(e) {
+    console.error('Error en scraper de eventos: '+e.message);
   }
 }
 
+// Cron: correr una vez al día a las 6am
+function startCron() {
+  const now = new Date();
+  const next6am = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0);
+  if (next6am <= now) next6am.setDate(next6am.getDate() + 1);
+  const msUntil6am = next6am - now;
+  console.log('[EventosScraper] Próxima actualización: ' + next6am.toLocaleString('es-AR'));
+  setTimeout(() => {
+    runEventosScraper();
+    setInterval(runEventosScraper, 24 * 60 * 60 * 1000); // cada 24hs
+  }, msUntil6am);
+}
+
 module.exports = runEventosScraper;
+module.exports.startCron = startCron;
