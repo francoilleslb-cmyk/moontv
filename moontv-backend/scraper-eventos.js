@@ -39,6 +39,15 @@ const FOOTBALL_COMPETITIONS = [
   'Liga BetPlay', 'Torneo Apertura', 'Torneo Clausura',
 ].sort((a, b) => b.length - a.length);
 
+// Equipos/ligas que NO son fútbol — descartar aunque haya match
+const NON_FOOTBALL = [
+  'Red Sox','Yankees','Dodgers','Mets','Cubs','Braves','Astros','Reds',
+  'Ducks','Penguins','Sabres','Islanders','Inslanders','Rangers','Bruins',
+  'Lakers','Celtics','Warriors','Bulls','Knicks','Thunder','Hawks','Bucks',
+  'Clippers','Spurs','Mavericks',
+  'Volleyball','Voleibol','Vóleibol','Hockey','Basketball','Básquetbol',
+];
+
 const MONTHS = {
   'enero':0,'febrero':1,'marzo':2,'abril':3,'mayo':4,'junio':5,
   'julio':6,'agosto':7,'septiembre':8,'octubre':9,'noviembre':10,'diciembre':11
@@ -121,8 +130,10 @@ async function scrapePage() {
       const normComp = normalize(comp);
       const idx = normHome.lastIndexOf(normComp);
       if (idx !== -1) {
+        // Verificar que sea palabra completa (no MLB vs MLS)
+        const after = normHome[idx + normComp.length] || ' ';
+        if (/[a-z]/.test(after)) continue;
         competition = comp;
-        // El equipo es lo que viene DESPUÉS de la competición
         teamHome = rawHome.substring(idx + comp.length).trim();
         break;
       }
@@ -133,7 +144,11 @@ async function scrapePage() {
       const beforeText = text.substring(Math.max(0, pos - 150), pos);
       const normBefore = normalize(beforeText);
       for (const comp of FOOTBALL_COMPETITIONS) {
-        if (normBefore.includes(normalize(comp))) {
+        const nc = normalize(comp);
+        const idx = normBefore.lastIndexOf(nc);
+        if (idx !== -1) {
+          const after = normBefore[idx + nc.length] || ' ';
+          if (/[a-z]/.test(after)) continue;
           competition = comp;
           break;
         }
@@ -156,6 +171,13 @@ async function scrapePage() {
 
     const finalHome = cleanPrefixes(teamHome);
     const finalAway = cleanPrefixes(rawAway.split(/\s+/).slice(0, 5).join(' '));
+
+    // Verificar que no sea deporte no-fútbol
+    const isNonFootball = NON_FOOTBALL.some(nf => 
+      finalHome.includes(nf) || finalAway.includes(nf) || 
+      normalize(finalHome).includes(normalize(nf)) || normalize(finalAway).includes(normalize(nf))
+    );
+    if (isNonFootball) continue;
 
     if (!finalHome || !finalAway || finalHome.length < 2 || finalAway.length < 2) continue;
     if (finalHome === finalAway) continue;

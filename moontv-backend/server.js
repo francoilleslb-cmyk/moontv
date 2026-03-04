@@ -6,8 +6,7 @@ const path = require('path');
 const { exec } = require('child_process'); // Para ejecutar yt-dlp
 const runScraper = require('./scraper');    // Para cargar el scraper que creaste
 const runSeriesScraper = require('./scraper-series');
-runEventosScraper();
-runEventosScraper.startCron();
+const runEventosScraper = require('./scraper-eventos');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,6 +29,7 @@ mongoose.connect(process.env.MONGODB_URI)
     runScraper();
     runSeriesScraper();
     runEventosScraper();
+    runEventosScraper.startCron();
   })
   .catch(err => { 
     console.error('❌  MongoDB:', err.message); 
