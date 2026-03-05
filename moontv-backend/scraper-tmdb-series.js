@@ -60,11 +60,22 @@ async function runTMDBSeriesScraper() {
     for (const s of all) {
       if (!seen.has(s.id)) { seen.add(s.id); unique.push(s); }
     }
-    console.log('[TMDBSeries] Total únicas:', unique.length);
+console.log('[TMDBSeries] Total únicas:', unique.length);
+
+const currentYear = new Date().getFullYear();
+const filtered = unique
+  .filter(s => {
+    const year = s.first_air_date ? parseInt(s.first_air_date.substring(0, 4)) : 0;
+    return year >= currentYear - 5;
+  })
+  .filter(s => s.vote_average >= 6.5)
+  .sort((a, b) => b.vote_average - a.vote_average);
+
+console.log('[TMDBSeries] Después de filtros:', filtered.length);
 
     let added = 0, updated = 0, skipped = 0;
 
-    for (const s of unique) {
+    for (const s of filtered) {
       if (!s.name || !s.poster_path) { skipped++; continue; }
 
       const imdbId = await getExternalIds(s.id);
@@ -73,7 +84,7 @@ async function runTMDBSeriesScraper() {
       await new Promise(r => setTimeout(r, 150));
 
       const genres = (s.genre_ids || []).map(id => GENRE_MAP[id]).filter(Boolean);
-      const streamUrl = `https://vidsrc.xyz/embed/tv/${imdbId}`;
+const streamUrl = `https://modocine.com/watch/?type=tv&id=${s.id}`;
 
       const seriesData = {
         title: s.name,
@@ -90,7 +101,7 @@ async function runTMDBSeriesScraper() {
         imdbId,
         tmdbId: s.id,
         streamUrl,
-        embedType: 'vidsrc',
+        embedType: 'modocine',
         status: 'active',
         isActive: true,
       };
