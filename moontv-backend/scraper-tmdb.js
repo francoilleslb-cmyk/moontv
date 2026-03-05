@@ -114,7 +114,7 @@ const spanishMovies = unique
         language:      m.original_language,  // 'es'
         imdbId,
         tmdbId:        m.id,
-        streamUrl:     `https://vidsrc.xyz/embed/movie/${imdbId}?ds_lang=es`,
+        streamUrl: `https://multiembed.mov/?video_id=${imdbId}&tmdb=1`,
         embedType:     'vidsrc',
         status:        'active',
         isActive:      true,
