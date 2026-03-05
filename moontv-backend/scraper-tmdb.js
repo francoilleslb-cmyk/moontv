@@ -114,7 +114,7 @@ const spanishMovies = unique
         language:      m.original_language,  // 'es'
         imdbId,
         tmdbId:        m.id,
-        streamUrl: `https://multiembed.mov/?video_id=${imdbId}&tmdb=1`,
+        streamUrl: `https://modocine.com/watch/?type=movie&id=${m.id}`,
         embedType:     'vidsrc',
         status:        'active',
         isActive:      true,
