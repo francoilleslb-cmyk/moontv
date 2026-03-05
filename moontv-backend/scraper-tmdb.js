@@ -75,9 +75,7 @@ async function runTMDBScraper() {
     }
 
     // Filtrar solo idioma español
-    const spanishMovies = unique.filter(m =>
-      SPANISH_LANGUAGES.includes(m.original_language)
-    );
+    const spanishMovies = unique;
 
     console.log(`[TMDB] Total únicas: ${unique.length} | En español: ${spanishMovies.length}`);
 
@@ -109,7 +107,7 @@ async function runTMDBScraper() {
         language:      m.original_language,  // 'es'
         imdbId,
         tmdbId:        m.id,
-        streamUrl:     `https://vidsrc.xyz/embed/movie/${imdbId}`,
+        streamUrl:     `https://vidsrc.xyz/embed/movie/${imdbId}?ds_lang=es`,
         embedType:     'vidsrc',
         status:        'active',
         isActive:      true,
