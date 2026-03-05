@@ -75,7 +75,14 @@ async function runTMDBScraper() {
     }
 
     // Filtrar solo idioma español
-    const spanishMovies = unique;
+    const currentYear = new Date().getFullYear();
+const spanishMovies = unique
+  .filter(m => {
+    const year = m.release_date ? parseInt(m.release_date.substring(0, 4)) : 0;
+    return year >= currentYear - 5;
+  })
+  .filter(m => m.vote_average >= 6.5)        // puntuación mínima 6.5
+  .sort((a, b) => b.vote_average - a.vote_average); // mejor puntuadas primero
 
     console.log(`[TMDB] Total únicas: ${unique.length} | En español: ${spanishMovies.length}`);
 
