@@ -84,7 +84,7 @@ console.log('[TMDBSeries] Después de filtros:', filtered.length);
       await new Promise(r => setTimeout(r, 150));
 
       const genres = (s.genre_ids || []).map(id => GENRE_MAP[id]).filter(Boolean);
-const streamUrl = `https://modocine.com/watch/?type=tv&id=${s.id}`;
+      streamUrl: `https://www.cineby.gd/movie/${m.id}`,
 
       const seriesData = {
         title: s.name,
@@ -101,7 +101,7 @@ const streamUrl = `https://modocine.com/watch/?type=tv&id=${s.id}`;
         imdbId,
         tmdbId: s.id,
         streamUrl,
-        embedType: 'modocine',
+        embedType: 'cineby',
         status: 'active',
         isActive: true,
       };
