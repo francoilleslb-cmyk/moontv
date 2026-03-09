@@ -2,9 +2,9 @@ package com.moontv.tvapp
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
-import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -18,8 +18,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mediaAdapter: MediaAdapter
     private lateinit var progressBar: ProgressBar
 
-    private val m3uUrl = "https://iptv-org.github.io/iptv/index.m3u"
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -28,10 +26,17 @@ class MainActivity : AppCompatActivity() {
         val recyclerView: RecyclerView = findViewById(R.id.mediaRecyclerView)
 
         mediaAdapter = MediaAdapter { item ->
-            startActivity(Intent(this, PlayerActivity::class.java).apply {
-                putExtra(PlayerActivity.EXTRA_TITLE, item.title)
-                putExtra(PlayerActivity.EXTRA_URL, item.url)
-            })
+            lifecycleScope.launch {
+                val stream = repository.resolvePlayback(item)
+                if (stream.isBlank()) {
+                    Toast.makeText(this@MainActivity, "No hay stream disponible", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                startActivity(Intent(this@MainActivity, PlayerActivity::class.java).apply {
+                    putExtra(PlayerActivity.EXTRA_TITLE, item.title)
+                    putExtra(PlayerActivity.EXTRA_URL, stream)
+                })
+            }
         }
 
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -49,7 +54,7 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
         lifecycleScope.launch {
             val list = when (section) {
-                Section.LIVE_TV -> repository.loadLiveTv(m3uUrl)
+                Section.LIVE_TV -> repository.loadLiveTv()
                 Section.MOVIES -> repository.loadMovies()
                 Section.SERIES -> repository.loadSeries()
                 Section.EVENTS -> repository.loadEvents()

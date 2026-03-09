@@ -1,27 +1,24 @@
 # MoonTV Android TV (Kotlin)
 
-Aplicación para Smart TV (Android TV) con secciones:
-- TV en vivo (carga lista M3U remota y la parsea)
-- Películas
-- Series
-- Eventos
+App para Smart TV conectada al backend:
+- `http://146.235.246.187:3000`
 
-Incluye reproductor con ExoPlayer/Media3 para reproducir streams HLS/M3U8.
+Secciones:
+- TV en vivo (`/api/channels`)
+- Películas (`/api/movies`)
+- Series (`/api/series`)
+- Eventos (`/api/events`, puede requerir `ADMIN_KEY` en backend)
 
-## Estructura
-- `MainActivity`: menú principal y listado por sección.
-- `CatalogRepository`: catálogo demo + parser M3U.
-- `PlayerActivity`: pantalla de reproducción.
+## Reproducción
+- Canales: reproduce `streamUrl` con Media3/ExoPlayer.
+- Películas y Series: primero resuelve `/play`; si la URL es tipo `cineby/embed`, abre en `WebView`; si es stream directo (`.m3u8/.mp4`), usa ExoPlayer.
 
-## Generar APK en GitHub Actions (recomendado)
-1. Sube esta rama a GitHub.
-2. Ve a **Actions** y ejecuta el workflow **Build MoonTV Android TV APK**.
-3. Descarga el artifact `moontv-tv-debug-apk`.
+## Generar APK en GitHub Actions
+1. Subir rama a GitHub.
+2. Ejecutar workflow **Build MoonTV Android TV APK**.
+3. Descargar artifact `moontv-tv-debug-apk`.
 
-Salida esperada:
-- `moontv-tv/app/build/outputs/apk/debug/app-debug.apk`
-
-## Build local (opcional)
+## Build local
 ```bash
 cd moontv-tv
 export JAVA_HOME=/ruta/a/java17
