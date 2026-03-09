@@ -84,7 +84,7 @@ console.log('[TMDBSeries] Después de filtros:', filtered.length);
       await new Promise(r => setTimeout(r, 150));
 
      const genres = (s.genre_ids || []).map(id => GENRE_MAP[id]).filter(Boolean);
-      const streamUrl = `https://www.cineby.gd/tv/${s.id}`;  // ← corregido
+     const streamUrl = `https://www.cineby.gd/tv/${s.id}`;  // ← corregido
 
       const seriesData = {
         title: s.name,
