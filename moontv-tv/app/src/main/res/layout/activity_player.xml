@@ -8,8 +8,8 @@
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        app:controller_auto_show="true"
-        app:show_buffering="always" />
+        app:controllerAutoShow="true"
+        app:showBuffering="always" />
 
     <TextView
         android:id="@+id/playerTitle"
