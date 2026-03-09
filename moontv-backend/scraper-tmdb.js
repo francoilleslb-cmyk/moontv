@@ -114,8 +114,8 @@ const spanishMovies = unique
         language:      m.original_language,  // 'es'
         imdbId,
         tmdbId:        m.id,
-        streamUrl: `https://modocine.com/watch/?type=movie&id=${m.id}`,
-        embedType:     'vidsrc',
+        streamUrl: `https://www.cineby.gd/movie/${m.id}`,
+        embedType: 'cineby',
         status:        'active',
         isActive:      true,
       };
