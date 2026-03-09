@@ -14,9 +14,6 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: moontv-tv
 
     steps:
       - name: Checkout
@@ -28,15 +25,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        working-directory: moontv-tv
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: moontv-tv-debug-apk
-          path: moontv-tv/app/build/outputs/apk/debug/app-debug.apk
+          path: moontv-tv/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
