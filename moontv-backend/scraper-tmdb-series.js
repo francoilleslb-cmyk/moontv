@@ -87,7 +87,6 @@ console.log('[TMDBSeries] Después de filtros:', filtered.length);
       const streamUrl = `https://www.cineby.gd/tv/${s.id}`;  // ← corregido
 
       const seriesData = {
-      const seriesData = {
         title: s.name,
         originalTitle: s.original_name || '',
         synopsis: s.overview || '',
