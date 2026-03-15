@@ -1770,7 +1770,7 @@ async function openEditChannel(id) {
 
     // Servers
     document.getElementById('servers-list').innerHTML = '';
-    (ch.servers || []).forEach(s => addServerRow(s.url, s.label, s.type));
+    (ch.servers || []).forEach(s => addServerRow(s.url, s.label, s.type, s.drm || null));
 
     updateLogoPreview();
     document.getElementById('channel-modal').classList.add('open');
@@ -1807,22 +1807,49 @@ function updateLogoPreview() {
 }
 
 // ─── SERVERS ────────────────────────────────────────────────────────────────
-function addServerRow(url = '', label = 'HD', type = 'hls') {
+function addServerRow(url = '', label = 'HD', type = 'hls', drm = null) {
   const list = document.getElementById('servers-list');
   const row = document.createElement('div');
   row.className = 'server-row';
+  row.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-bottom:4px';
+  const hasDrm = drm && (drm.licenseKey || drm.licenseType);
   row.innerHTML = `
-    <input type="url" class="form-input srv-url" value="${esc(url)}" placeholder="https://stream.ejemplo.com/live.m3u8" style="font-family:var(--mono);font-size:12px">
-    <input type="text" class="form-input srv-label" value="${esc(label)}" placeholder="HD">
-    <select class="form-select srv-type">
-      <option value="hls" ${type==='hls'?'selected':''}>HLS</option>
-      <option value="mp4" ${type==='mp4'?'selected':''}>MP4</option>
-      <option value="rtmp" ${type==='rtmp'?'selected':''}>RTMP</option>
-      <option value="dash" ${type==='dash'?'selected':''}>DASH</option>
-    </select>
-    <button class="btn-remove-server" onclick="this.closest('.server-row').remove()">✕</button>
+    <div style="display:grid;grid-template-columns:1fr 90px 90px auto;gap:8px;align-items:center">
+      <input type="url" class="form-input srv-url" value="${esc(url)}" placeholder="https://stream.ejemplo.com/live.m3u8" style="font-family:var(--mono);font-size:12px">
+      <input type="text" class="form-input srv-label" value="${esc(label)}" placeholder="HD">
+      <select class="form-select srv-type">
+        <option value="hls"  ${type==='hls' ?'selected':''}>HLS</option>
+        <option value="mp4"  ${type==='mp4' ?'selected':''}>MP4</option>
+        <option value="rtmp" ${type==='rtmp'?'selected':''}>RTMP</option>
+        <option value="dash" ${type==='dash'?'selected':''}>DASH</option>
+      </select>
+      <button class="btn-remove-server" onclick="this.closest('.server-row').remove()">✕</button>
+    </div>
+    <div class="drm-section" style="display:${hasDrm?'grid':'none'};grid-template-columns:120px 1fr;gap:8px;align-items:center">
+      <input type="text" class="form-input srv-drm-type" value="${esc(drm?.licenseType||'clearkey')}" placeholder="clearkey" style="font-family:var(--mono);font-size:11px">
+      <input type="text" class="form-input srv-drm-key"  value="${esc(drm?.licenseKey||'')}" placeholder="keyId:key (hex)" style="font-family:var(--mono);font-size:11px">
+    </div>
+    <button type="button" onclick="toggleDrmRow(this)" style="background:none;border:none;color:${hasDrm?'var(--accent)':'var(--text3)'};font-size:11px;cursor:pointer;text-align:left;padding:0;font-family:var(--font)">
+      ${hasDrm ? '\uD83D\uDD10 DRM activo \u2014 ocultar' : '+ Agregar DRM (ClearKey)'}
+    </button>
   `;
+  row.querySelector('.srv-type').addEventListener('change', function() {
+    if (this.value === 'dash') {
+      row.querySelector('.drm-section').style.display = 'grid';
+      const btn = row.querySelector('button[onclick*="toggleDrmRow"]');
+      btn.textContent = '\uD83D\uDD10 DRM activo \u2014 ocultar';
+      btn.style.color = 'var(--accent)';
+    }
+  });
   list.appendChild(row);
+}
+
+function toggleDrmRow(btn) {
+  const section = btn.previousElementSibling;
+  const visible = section.style.display !== 'none';
+  section.style.display = visible ? 'none' : 'grid';
+  btn.textContent = visible ? '+ Agregar DRM (ClearKey)' : '\uD83D\uDD10 DRM activo \u2014 ocultar';
+  btn.style.color = visible ? 'var(--text3)' : 'var(--accent)';
 }
 
 // ─── SAVE CHANNEL ────────────────────────────────────────────────────────────
@@ -1833,11 +1860,17 @@ async function saveChannel() {
   if (!name) { showToast('error', 'El nombre es obligatorio'); return; }
   if (!streamUrl) { showToast('error', 'El stream principal es obligatorio'); return; }
 
-  const servers = [...document.querySelectorAll('#servers-list .server-row')].map(row => ({
-    url:   row.querySelector('.srv-url').value.trim(),
-    label: row.querySelector('.srv-label').value.trim() || 'HD',
-    type:  row.querySelector('.srv-type').value,
-  })).filter(s => s.url);
+  const servers = [...document.querySelectorAll('#servers-list .server-row')].map(row => {
+    const s = {
+      url:   row.querySelector('.srv-url').value.trim(),
+      label: row.querySelector('.srv-label').value.trim() || 'HD',
+      type:  row.querySelector('.srv-type').value,
+    };
+    const drmKey  = row.querySelector('.srv-drm-key')?.value.trim();
+    const drmType = row.querySelector('.srv-drm-type')?.value.trim();
+    if (drmKey) s.drm = { licenseType: drmType || 'clearkey', licenseKey: drmKey };
+    return s;
+  }).filter(s => s.url);
 
   const payload = {
     name,
@@ -1981,23 +2014,38 @@ function parseM3U(content) {
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
   const channels = [];
   let current = null;
+  let drm = {};
   for (const line of lines) {
+    // KODIPROP (con o sin # al inicio)
+    const raw  = line.startsWith('#') ? line.slice(1) : line;
+    const kodi = raw.match(/^KODIPROP:inputstream\.adaptive\.(\w+)=(.+)/);
+    if (kodi) {
+      if (kodi[1] === 'license_type') drm.licenseType = kodi[2].trim();
+      if (kodi[1] === 'license_key')  drm.licenseKey  = kodi[2].trim();
+      continue;
+    }
     if (line.startsWith('#EXTINF:')) {
       const tvgName    = line.match(/tvg-name="([^"]+)"/);
       const tvgLogo    = line.match(/tvg-logo="([^"]+)"/);
       const groupTitle = line.match(/group-title="([^"]+)"/);
+      const chNumber   = line.match(/ch-number="(\d+)"/);
       const nameEnd    = line.lastIndexOf(',');
       current = {
-        name:     nameEnd >= 0 ? line.slice(nameEnd+1).trim() : (tvgName?.[1] || 'Canal'),
-        logo:     tvgLogo?.[1] || '',
-        category: groupTitle?.[1] || 'General',
-        country:  'AR',
-        status:   'active',
-        servers:  [],
+        name:      nameEnd >= 0 ? line.slice(nameEnd+1).trim() : (tvgName?.[1] || 'Canal'),
+        logo:      tvgLogo?.[1]    || '',
+        category:  groupTitle?.[1] || 'General',
+        sortOrder: chNumber ? parseInt(chNumber[1]) : 0,
+        country:   'AR',
+        status:    'active',
+        servers:   [],
       };
     } else if (current && !line.startsWith('#') && (line.startsWith('http') || line.startsWith('rtmp'))) {
+      const isDash = line.includes('.mpd');
+      const server = { url: line, label: 'HD', type: isDash ? 'dash' : 'hls' };
+      if (Object.keys(drm).length) server.drm = { ...drm };
       current.streamUrl = line;
-      current.servers   = [{ url: line, label: 'HD', type: 'hls' }];
+      current.servers   = [server];
+      drm = {};
       channels.push(current);
       current = null;
     }
