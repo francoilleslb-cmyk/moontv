@@ -5,7 +5,7 @@ const Channel  = require('../models/Channel');
 const User     = require('../models/User');
 const { protect, adminAuth } = require('../middleware/auth');
 
-router.use(adminAuth); // protege PUT/POST/DELETE con ADMIN_KEY
+router.use(adminAuth);
 
 // ── GET /api/channels/stats ─────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
@@ -149,29 +149,78 @@ router.post('/import', async (req, res) => {
     for (const ch of toImport) {
       try {
         const exists = await Channel.findOne({ name: ch.name });
-        if (exists) { await Channel.findByIdAndUpdate(exists._id, ch); updated++; }
-        else        { await Channel.create(ch); created++; }
+        if (exists) {
+          // Actualizar key DRM si cambió
+          const newKey  = ch.servers?.[0]?.drm?.licenseKey;
+          const currKey = exists.servers?.find(s => s.url === ch.streamUrl)?.drm?.licenseKey;
+          if (newKey && newKey !== currKey) {
+            const srvIdx = exists.servers.findIndex(s => s.url === ch.streamUrl);
+            if (srvIdx >= 0) exists.servers[srvIdx].drm = ch.servers[0].drm;
+            else             exists.servers.push(ch.servers[0]);
+            exists.markModified('servers');
+            await exists.save();
+          } else {
+            await Channel.findByIdAndUpdate(exists._id, ch);
+          }
+          updated++;
+        } else {
+          await Channel.create(ch);
+          created++;
+        }
       } catch { errors++; }
     }
     res.json({ success: true, data: { created, updated, errors }, message: `${created} nuevos, ${updated} actualizados, ${errors} errores` });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── DELETE /api/channels  (admin) — borrar múltiples ────────────────────────
+router.delete('/', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || !ids.length)
+      return res.status(400).json({ success: false, message: 'ids requerido' });
+    const result = await Channel.deleteMany({ _id: { $in: ids } });
+    res.json({ success: true, message: `${result.deletedCount} canales eliminados` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── PARSE M3U con soporte KODIPROP (DRM ClearKey) ───────────────────────────
 function parseM3U(content) {
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-  const out = []; let cur = null;
+  const out   = [];
+  let cur = null;
+  let drm = {};
+
   for (const line of lines) {
+    // Capturar KODIPROP (con o sin # al inicio)
+    const raw  = line.startsWith('#') ? line.slice(1) : line;
+    const kodi = raw.match(/^KODIPROP:inputstream\.adaptive\.(\w+)=(.+)/);
+    if (kodi) {
+      if (kodi[1] === 'license_type') drm.licenseType = kodi[2].trim();
+      if (kodi[1] === 'license_key')  drm.licenseKey  = kodi[2].trim();
+      continue;
+    }
+
     if (line.startsWith('#EXTINF:')) {
+      const nameMatch = line.match(/,(.+)$/);
+      const tvgName   = line.match(/tvg-name="([^"]+)"/);
       cur = {
-        name:     (line.match(/tvg-name="([^"]+)"/) || line.match(/,(.+)$/))?.[1] || 'Canal',
-        logo:     line.match(/tvg-logo="([^"]+)"/) ?.[1] || '',
-        category: line.match(/group-title="([^"]+)"/)?.[1] || 'General',
-        country:  'AR', status: 'active',
+        name:      nameMatch?.[1]?.trim() || tvgName?.[1] || 'Canal',
+        logo:      line.match(/tvg-logo="([^"]+)"/)    ?.[1] || '',
+        category:  line.match(/group-title="([^"]+)"/) ?.[1] || 'General',
+        sortOrder: parseInt(line.match(/ch-number="(\d+)"/) ?.[1] || '0'),
+        country:   'AR',
+        status:    'active',
       };
     } else if (cur && !line.startsWith('#') && line.startsWith('http')) {
+      const isDash = line.includes('.mpd');
+      const server = { url: line, label: 'HD', type: isDash ? 'dash' : 'hls' };
+      if (Object.keys(drm).length) server.drm = { ...drm };
       cur.streamUrl = line;
-      cur.servers   = [{ url: line, label: 'HD', type: 'hls' }];
-      out.push(cur); cur = null;
+      cur.servers   = [server];
+      out.push(cur);
+      cur = null;
+      drm = {};
     }
   }
   return out;
