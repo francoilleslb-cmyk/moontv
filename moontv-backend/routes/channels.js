@@ -129,6 +129,24 @@ router.patch('/:id/status', async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, message: err.message }); }
 });
 
+// ── POST /api/channels/test-stream  (admin) ─────────────────────────────────
+router.post('/test-stream', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ success: false, message: 'URL requerida' });
+
+  const lib = url.startsWith('https') ? require('https') : require('http');
+  const result = await new Promise(resolve => {
+    const request = lib.request(url, { method: 'HEAD', timeout: 6000 }, r => {
+      resolve({ working: r.statusCode < 400, statusCode: r.statusCode });
+    });
+    request.on('error',   (e) => resolve({ working: false, statusCode: 0, error: e.message }));
+    request.on('timeout', ()  => { request.destroy(); resolve({ working: false, statusCode: 0, error: 'timeout' }); });
+    request.end();
+  });
+
+  res.json({ success: true, data: result });
+});
+
 // ── DELETE /api/channels/:id  (admin) ────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
@@ -184,6 +202,22 @@ router.delete('/', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ─── CATEGORÍA POR NOMBRE DE CANAL ───────────────────────────────────────────
+function guessCategory(name) {
+  const n = name.toLowerCase();
+  if (/espn|fox sport|dsport|directv sport|tyc|ole|flow sport|deportes|nacion deportiva|canal\+\s*\d|sport\s*\d/i.test(n))         return 'Deportes';
+  if (/tn\b|c5n|infobae|a24|cnn|bbc|euronews|cronica|ip\s*noticias|noticias|news|telam/i.test(n))                                   return 'Noticias';
+  if (/disney|cartoon|nickelodeon|baby tv|paka|discovery kids|nik\b|pequeños|infantil|mini/i.test(n))                               return 'Infantil';
+  if (/hbo|cinemax|paramount|star\b|space\b|tnt\b|universal|cine\b|cineco|multiplex|mov\b|golden|odeon/i.test(n))                   return 'Películas';
+  if (/nat geo|discovery|history|animal planet|science|odisea|documental|encuentro|paka paka/i.test(n))                             return 'Documentales';
+  if (/mtv\b|vh1|flow music|hit\b|musica|rock|pop\b|clásica|cadena|mega\s*music/i.test(n))                                         return 'Música';
+  if (/netflix|hbo\s*series|star\+|ax\b|tbs\b|series|fox\b|sony\b|much\b|id\b|e!\b|bravo/i.test(n))                               return 'Series';
+  if (/america\b|telefe|trece|canal\s*9|el\s*nueve|publica|canal\s*26|tv\s*publica|elnueve|once\s*tv|mega\b/i.test(n))             return 'Entretenimiento';
+  if (/regional|litoral|cordillera|patagonia|local|ciudad|cordoba|rosario|mendoza|tucuman/i.test(n))                               return 'Regional';
+  if (/comedy|humor|syfy|fx\b|axn\b|warner\b/i.test(n))                                                                            return 'Entretenimiento';
+  return 'General';
+}
+
 // ─── PARSE M3U con soporte KODIPROP (DRM ClearKey) ───────────────────────────
 function parseM3U(content) {
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
@@ -204,10 +238,17 @@ function parseM3U(content) {
     if (line.startsWith('#EXTINF:')) {
       const nameMatch = line.match(/,(.+)$/);
       const tvgName   = line.match(/tvg-name="([^"]+)"/);
+      const name      = nameMatch?.[1]?.trim() || tvgName?.[1] || 'Canal';
+
+      // Si el group-title parece nombre de proveedor, ignorarlo y adivinar por nombre
+      const rawCategory  = line.match(/group-title="([^"]+)"/) ?.[1] || '';
+      const isProvider   = /flow|opcion|opción|pack|lista|option|proveedor|hd\s*\d|sd\s*\d|vod|iptv/i.test(rawCategory);
+      const category     = isProvider ? guessCategory(name) : (rawCategory || guessCategory(name));
+
       cur = {
-        name:      nameMatch?.[1]?.trim() || tvgName?.[1] || 'Canal',
+        name,
         logo:      line.match(/tvg-logo="([^"]+)"/)    ?.[1] || '',
-        category:  line.match(/group-title="([^"]+)"/) ?.[1] || 'General',
+        category,
         sortOrder: parseInt(line.match(/ch-number="(\d+)"/) ?.[1] || '0'),
         country:   'AR',
         status:    'active',
